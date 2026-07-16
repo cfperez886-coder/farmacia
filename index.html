@@ -2,6 +2,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <title>Mi Negocio — Gestión</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧾</text></svg>">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#6d28d9">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <script src="https://cdn.tailwindcss.com"></script>
 <script>
   tailwind.config = {
@@ -36,7 +41,8 @@
 /* ---------- Utilidades ---------- */
 const $ = (s, r=document) => r.querySelector(s);
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2,7);
-const todayISO = () => new Date().toISOString().slice(0,10);
+const isoLocal = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+const todayISO = () => isoLocal(new Date()); // fecha LOCAL (evita que ventas nocturnas queden con fecha de mañana por UTC)
 const fmtMoney = n => new Intl.NumberFormat('es-CO',{style:'currency',currency:'COP',maximumFractionDigits:0}).format(+n||0);
 const fmtNum = n => new Intl.NumberFormat('es-CO').format(+n||0);
 const fmtDate = iso => { if(!iso) return '—'; const [y,m,d]=iso.split('-'); return `${d}/${m}/${y}`; };
@@ -189,6 +195,7 @@ const cloud = {
     catch(e){ this.status='nolib'; updateCloudBadges(); return; }
     this.ready = true; this.status = 'desconectado';
     this.sb.auth.onAuthStateChange((event, session)=>{
+      if(event==='PASSWORD_RECOVERY'){ setTimeout(()=>openNuevaPass(), 400); }
       if(session && session.user){
         const nuevo = !this.user || this.user.id !== session.user.id;
         this.user = session.user;
@@ -330,6 +337,7 @@ function openCuenta(){
           <button type="submit" data-mode="signin" class="flex-1 bg-brand hover:bg-brand-700 text-white font-semibold py-2.5 rounded-xl">Iniciar sesión</button>
           <button type="submit" data-mode="signup" class="flex-1 border border-slate-200 hover:bg-slate-50 font-medium py-2.5 rounded-xl">Crear cuenta</button>
         </div>
+        <button type="button" onclick="cloudResetPass()" class="w-full text-center text-xs text-brand-700 mt-3 py-1">¿Olvidaste tu contraseña?</button>
       </form>`;
   }
   openModal('☁️ Cuenta y sincronización', body);
@@ -354,6 +362,35 @@ async function cloudAuth(e){
 }
 function cloudPull(){ cloud.pull(); }
 async function cloudLogout(){ await cloud.signOut(); toast('Sesión cerrada'); }
+async function cloudResetPass(){
+  const emailInp = document.querySelector('#modal [name=email]');
+  const email = emailInp ? emailInp.value.trim() : '';
+  const msg = document.getElementById('authMsg');
+  if(!email){ if(msg){ msg.style.color='#e11d48'; msg.textContent='Escribe tu correo arriba y vuelve a tocar este enlace.'; } return; }
+  try{
+    await cloud.sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname });
+    if(msg){ msg.style.color='#0d9488'; msg.textContent='Listo: revisa tu correo y abre el enlace para crear una nueva contraseña.'; }
+  }catch(err){ if(msg){ msg.style.color='#e11d48'; msg.textContent = traducirError(err); } }
+}
+function openNuevaPass(){
+  openModal('🔑 Nueva contraseña',
+    `<p class="text-sm text-slate-500 mb-3">Escribe tu nueva contraseña para terminar la recuperación.</p>
+     <form onsubmit="return saveNuevaPass(event)">
+      ${field('Nueva contraseña',`<input name="pass" type="password" required minlength="6" class="${inputCls}" placeholder="mínimo 6 caracteres">`)}
+      <div id="npMsg" class="text-xs mb-2 min-h-[16px]"></div>
+      <button type="submit" class="w-full bg-brand hover:bg-brand-700 text-white font-semibold py-2.5 rounded-xl">Guardar contraseña</button>
+     </form>`);
+}
+async function saveNuevaPass(e){
+  e.preventDefault();
+  const msg = document.getElementById('npMsg');
+  try{
+    const { error } = await cloud.sb.auth.updateUser({ password: e.target.pass.value });
+    if(error) throw error;
+    closeModal(); toast('Contraseña actualizada ✓');
+  }catch(err){ if(msg){ msg.style.color='#e11d48'; msg.textContent = traducirError(err); } }
+  return false;
+}
 
 /* ---------- Helpers de dominio ---------- */
 const getProducto = id => DB.productos.find(p=>p.id===id);
@@ -575,7 +612,7 @@ function viewDashboard(){
   const kpi = (label,val,sub,color)=>`<div class="card p-4"><div class="text-xs text-slate-400 font-medium">${label}</div><div class="text-2xl font-bold mt-1 ${color||''}">${val}</div>${sub?`<div class="text-xs text-slate-400 mt-0.5">${sub}</div>`:''}</div>`;
 
   return pageHead(`Hola 👋`, new Date().toLocaleDateString('es-CO',{weekday:'long',day:'numeric',month:'long'}),
-      btnPrimary('+ Nueva venta','openVenta()'))
+      btnGhost('🧾 Cierre','openCierre()') + btnPrimary('+ Nueva venta','openVenta()'))
     + `<div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
         ${kpi('Ventas de hoy', fmtMoney(totalHoy), `${ventasHoy.length} venta(s)`,'text-teal-600')}
         ${kpi('Ventas del mes', fmtMoney(totalMes), `Ganancia: ${fmtMoney(gananciaMes)}`)}
@@ -713,12 +750,12 @@ function viewReportes(){
   const maxCant = Math.max(1,...top.map(t=>t.cant));
 
   // Ventas últimos 7 días
-  const dias=[]; for(let i=6;i>=0;i--){ const d=new Date(); d.setDate(d.getDate()-i); const iso=d.toISOString().slice(0,10); dias.push({iso,label:d.toLocaleDateString('es-CO',{weekday:'short'}),total:DB.ventas.filter(v=>v.fecha===iso).reduce((s,v)=>s+v.total,0)}); }
+  const dias=[]; for(let i=6;i>=0;i--){ const d=new Date(); d.setDate(d.getDate()-i); const iso=isoLocal(d); dias.push({iso,label:d.toLocaleDateString('es-CO',{weekday:'short'}),total:DB.ventas.filter(v=>v.fecha===iso).reduce((s,v)=>s+v.total,0)}); }
   const maxDia=Math.max(1,...dias.map(d=>d.total));
 
   const kpi=(l,v,c)=>`<div class="card p-4"><div class="text-xs text-slate-400 font-medium">${l}</div><div class="text-xl font-bold mt-1 ${c||''}">${v}</div></div>`;
 
-  return pageHead('Reportes', new Date().toLocaleDateString('es-CO',{month:'long',year:'numeric'})+' · este mes')
+  return pageHead('Reportes', new Date().toLocaleDateString('es-CO',{month:'long',year:'numeric'})+' · este mes', btnGhost('🧾 Cierre de hoy','openCierre()'))
     + `<div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
         ${kpi('Ventas del mes',fmtMoney(totalMes),'text-teal-600')}
         ${kpi('Ganancia estimada',fmtMoney(gananciaMes),'text-brand-700')}
@@ -783,6 +820,15 @@ function openCliente(id){
       ${field('Correo',`<input name="email" type="email" value="${esc(c.email||'')}" class="${inputCls}">`)}
       ${field('Dirección',`<input name="direccion" value="${esc(c.direccion||'')}" class="${inputCls}">`)}
       ${field('Notas',`<textarea name="notas" rows="2" class="${inputCls}">${esc(c.notas||'')}</textarea>`)}
+      ${id && (c.movs||[]).length ? `<div class="bg-slate-50 rounded-xl p-3 mb-1">
+        <div class="text-xs font-medium text-slate-500 mb-2">Historial de deuda${c.saldo>0?` · debe <b class="text-amber-700">${fmtMoney(c.saldo)}</b>`:''}</div>
+        <div class="space-y-1 max-h-32 overflow-y-auto">${c.movs.slice(-12).reverse().map(m=>`
+          <div class="flex justify-between text-xs">
+            <span class="text-slate-400">${fmtDate(m.fecha)} · ${m.tipo==='abono'?'Abonó':m.tipo==='fiado'?'Compró fiado':'Venta anulada'}</span>
+            <span class="font-medium ${m.tipo==='fiado'?'text-amber-700':'text-teal-600'}">${m.tipo==='fiado'?'+':'−'}${fmtMoney(m.monto)}</span>
+          </div>`).join('')}</div>
+        ${c.saldo>0?`<button type="button" onclick="abonar('${id}')" class="w-full mt-2 text-xs text-teal-700 font-medium border border-teal-200 rounded-lg py-1.5 hover:bg-teal-50">Registrar abono</button>`:''}
+      </div>`:''}
       <div class="flex gap-2 mt-4">
         <button type="submit" class="flex-1 bg-brand hover:bg-brand-700 text-white font-semibold py-2.5 rounded-xl">Guardar</button>
         ${id?`<button type="button" onclick="delCliente('${id}')" class="px-4 py-2.5 rounded-xl border border-rose-200 text-rose-600 text-sm">Eliminar</button>`:''}
@@ -800,7 +846,9 @@ function abonar(id){
   const c=getCliente(id);
   const val=prompt(`${c.nombre} debe ${fmtMoney(c.saldo)}.\n¿Cuánto abona?`, c.saldo);
   if(val===null) return; const n=+val; if(isNaN(n)||n<=0) return toast('Monto inválido','err');
-  c.saldo=Math.max(0,(c.saldo||0)-n); store.save(); render(); toast('Abono registrado');
+  c.saldo=Math.max(0,(c.saldo||0)-n);
+  c.movs=c.movs||[]; c.movs.push({fecha:todayISO(),tipo:'abono',monto:n});
+  store.save(); render(); if(modal) openCliente(id); toast('Abono registrado');
 }
 
 /* ----- Producto ----- */
@@ -917,8 +965,9 @@ function confirmVenta(){
   carritoV.forEach(i=>descontarStock(i.prodId,i.cant));
   const venta={ id:uid(), fecha:todayISO(), creado:Date.now(), items:carritoV.map(i=>({prodId:i.prodId,cant:i.cant,precio:i.precio,costo:i.costo})), total, ganancia, fiado, clienteId:clienteId||null };
   DB.ventas.push(venta);
-  if(fiado && clienteId){ const c=getCliente(clienteId); c.saldo=(c.saldo||0)+total; }
+  if(fiado && clienteId){ const c=getCliente(clienteId); c.saldo=(c.saldo||0)+total; c.movs=c.movs||[]; c.movs.push({fecha:todayISO(),tipo:'fiado',monto:total}); }
   store.save(); closeModal(); render(); toast('Venta registrada ✔');
+  verVenta(venta.id); // muestra el recibo con opciones de WhatsApp/imprimir
 }
 function verVenta(id){
   const v=DB.ventas.find(x=>x.id===id); if(!v)return;
@@ -927,14 +976,75 @@ function verVenta(id){
      <div class="space-y-2 mb-3">${v.items.map(i=>{const p=getProducto(i.prodId);return `<div class="flex justify-between text-sm"><span>${esc(p?.nombre||'(eliminado)')} × ${i.cant}</span><span>${fmtMoney(i.cant*i.precio)}</span></div>`;}).join('')}</div>
      <div class="flex justify-between font-bold border-t border-slate-100 pt-2"><span>Total</span><span>${fmtMoney(v.total)}</span></div>
      <div class="flex justify-between text-sm text-teal-600 mt-1"><span>Ganancia</span><span>+${fmtMoney(v.ganancia)}</span></div>
-     <button onclick="delVenta('${id}')" class="mt-4 w-full border border-rose-200 text-rose-600 py-2.5 rounded-xl text-sm">Anular venta (devuelve stock)</button>`);
+     <div class="flex gap-2 mt-4">
+       <button onclick="waVenta('${id}')" class="flex-1 bg-teal-600 hover:bg-teal-700 text-white py-2.5 rounded-xl text-sm font-semibold">📲 WhatsApp</button>
+       <button onclick="printVenta('${id}')" class="flex-1 border border-slate-200 hover:bg-slate-50 py-2.5 rounded-xl text-sm">🖨️ Imprimir</button>
+     </div>
+     <button onclick="delVenta('${id}')" class="mt-2 w-full border border-rose-200 text-rose-600 py-2.5 rounded-xl text-sm">Anular venta (devuelve stock)</button>`);
+}
+
+/* ----- Recibos ----- */
+function reciboTexto(v){
+  const cl = v.clienteId ? getCliente(v.clienteId) : null;
+  const lineas = v.items.map(i=>{ const p=getProducto(i.prodId); return `• ${p?p.nombre:'(producto)'} x${i.cant} = ${fmtMoney(i.cant*i.precio)}`; });
+  return `🧾 *${DB.config.negocio}*\nRecibo de venta — ${fmtDate(v.fecha)}${cl?`\nCliente: ${cl.nombre}`:''}\n\n${lineas.join('\n')}\n\n*TOTAL: ${fmtMoney(v.total)}*${v.fiado?'\n(Venta fiada)':''}\n\n¡Gracias por su compra! 💊`;
+}
+function waVenta(id){
+  const v=DB.ventas.find(x=>x.id===id); if(!v) return;
+  const cl=v.clienteId? getCliente(v.clienteId):null;
+  let tel=((cl&&cl.telefono)||'').replace(/\D/g,'');
+  if(tel.length===10 && tel.startsWith('3')) tel='57'+tel; // celular colombiano
+  window.open('https://wa.me/'+(tel||'')+'?text='+encodeURIComponent(reciboTexto(v)),'_blank');
+}
+function printVenta(id){
+  const v=DB.ventas.find(x=>x.id===id); if(!v) return;
+  const w=window.open('','_blank','width=380,height=600'); if(!w) return toast('Permite ventanas emergentes para imprimir','err');
+  w.document.write(`<pre style="font:12px/1.5 monospace;white-space:pre-wrap;padding:12px">${esc(reciboTexto(v).replace(/\*/g,''))}</pre>`);
+  w.document.close(); w.focus(); w.print();
 }
 function delVenta(id){
   if(!confirm('¿Anular esta venta? Se devolverá el stock.'))return;
   const v=DB.ventas.find(x=>x.id===id); if(!v)return;
   v.items.forEach(i=>agregarLote(i.prodId,i.cant,'',i.costo));
-  if(v.fiado && v.clienteId){ const c=getCliente(v.clienteId); if(c) c.saldo=Math.max(0,(c.saldo||0)-v.total); }
+  if(v.fiado && v.clienteId){ const c=getCliente(v.clienteId); if(c){ c.saldo=Math.max(0,(c.saldo||0)-v.total); c.movs=c.movs||[]; c.movs.push({fecha:todayISO(),tipo:'anulacion',monto:v.total}); } }
   DB.ventas=DB.ventas.filter(x=>x.id!==id); store.save(); closeModal(); render(); toast('Venta anulada');
+}
+
+/* ----- Cierre de caja ----- */
+function cierreDatos(){
+  const hoy=todayISO();
+  const vs=DB.ventas.filter(v=>v.fecha===hoy);
+  const total=vs.reduce((s,v)=>s+v.total,0);
+  const fiado=vs.filter(v=>v.fiado).reduce((s,v)=>s+v.total,0);
+  const ganancia=vs.reduce((s,v)=>s+(v.ganancia||0),0);
+  const abonos=DB.clientes.reduce((s,c)=>s+(c.movs||[]).filter(m=>m.tipo==='abono'&&m.fecha===hoy).reduce((x,m)=>x+m.monto,0),0);
+  const compras=DB.compras.filter(c=>c.fecha===hoy).reduce((s,c)=>s+c.total,0);
+  return { hoy, n:vs.length, total, fiado, contado:total-fiado, ganancia, abonos, compras, efectivo:(total-fiado)+abonos };
+}
+function cierreTexto(){
+  const d=cierreDatos();
+  return `🧾 *${DB.config.negocio}* — Cierre de caja ${fmtDate(d.hoy)}\n\nVentas: ${d.n} por ${fmtMoney(d.total)}\n• De contado: ${fmtMoney(d.contado)}\n• Fiado: ${fmtMoney(d.fiado)}\nAbonos recibidos: ${fmtMoney(d.abonos)}\n\n💵 Efectivo del día: ${fmtMoney(d.efectivo)}\n📈 Ganancia estimada: ${fmtMoney(d.ganancia)}\n🛒 Compras del día: ${fmtMoney(d.compras)}`;
+}
+function openCierre(){
+  const d=cierreDatos();
+  const fila=(l,v,c)=>`<div class="flex justify-between text-sm py-2 border-b border-slate-50"><span class="text-slate-500">${l}</span><span class="font-semibold ${c||''}">${v}</span></div>`;
+  openModal('🧾 Cierre de caja — hoy',
+    fila('Ventas del día',`${d.n} venta(s) · ${fmtMoney(d.total)}`)
+    +fila('De contado',fmtMoney(d.contado))
+    +fila('Fiado',fmtMoney(d.fiado),'text-amber-600')
+    +fila('Abonos recibidos',fmtMoney(d.abonos),'text-teal-600')
+    +fila('💵 Efectivo del día',fmtMoney(d.efectivo),'text-teal-700')
+    +fila('Ganancia estimada',fmtMoney(d.ganancia),'text-brand-700')
+    +fila('Compras del día',fmtMoney(d.compras))
+    +`<div class="flex gap-2 mt-4">
+       <button onclick="window.open('https://wa.me/?text='+encodeURIComponent(cierreTexto()),'_blank')" class="flex-1 bg-teal-600 hover:bg-teal-700 text-white py-2.5 rounded-xl text-sm font-semibold">📲 WhatsApp</button>
+       <button onclick="printCierre()" class="flex-1 border border-slate-200 hover:bg-slate-50 py-2.5 rounded-xl text-sm">🖨️ Imprimir</button>
+     </div>`);
+}
+function printCierre(){
+  const w=window.open('','_blank','width=380,height=600'); if(!w) return toast('Permite ventanas emergentes para imprimir','err');
+  w.document.write(`<pre style="font:12px/1.5 monospace;white-space:pre-wrap;padding:12px">${esc(cierreTexto().replace(/\*/g,''))}</pre>`);
+  w.document.close(); w.focus(); w.print();
 }
 
 /* ----- Compra ----- */
@@ -1034,5 +1144,11 @@ function resetData(){ if(!confirm('Esto borrará TODOS los datos. ¿Continuar?')
 /* ---------- Arranque ---------- */
 render();
 cloud.init();
+// PWA: cachea la app para funcionar sin internet
+if('serviceWorker' in navigator && location.protocol==='https:'){ navigator.serviceWorker.register('sw.js').catch(()=>{}); }
+// Si hay un guardado pendiente y se cierra/minimiza la app, súbelo ya
+document.addEventListener('visibilitychange', ()=>{
+  if(document.visibilityState==='hidden' && cloud.user && cloud.pushTimer){ clearTimeout(cloud.pushTimer); cloud.pushTimer=null; cloud.push(true); }
+});
 </script>
 </body>
