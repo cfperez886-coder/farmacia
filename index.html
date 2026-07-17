@@ -170,9 +170,10 @@ const store = {
   data:null,
   load(){
     try{ this.data = JSON.parse(localStorage.getItem(this.key)) }catch(e){ this.data=null }
-    if(!this.data) this.data = { clientes:[], productos:[], compras:[], ventas:[], config:{ negocio:'Mi Negocio', alertaVencimiento:30, alertaStock:5 } };
+    if(!this.data) this.data = { clientes:[], productos:[], compras:[], ventas:[], gastos:[], config:{ negocio:'Mi Negocio', alertaVencimiento:30, alertaStock:5 } };
     // asegurar campos nuevos
     this.data.config = Object.assign({ negocio:'Mi Negocio', alertaVencimiento:30, alertaStock:5 }, this.data.config||{});
+    if(!Array.isArray(this.data.gastos)) this.data.gastos=[];
     return this.data;
   },
   save(){ localStorage.setItem(this.key, JSON.stringify(this.data)); if(cloud.ready && cloud.user && !cloud.applying) cloud.push(); },
@@ -242,7 +243,7 @@ const cloud = {
     Object.keys(DB).forEach(k=>delete DB[k]);
     Object.assign(DB, cd);
     if(!DB.config) DB.config = { negocio:'Mi Negocio', alertaVencimiento:30, alertaStock:5 };
-    ['clientes','productos','compras','ventas'].forEach(k=>{ if(!Array.isArray(DB[k])) DB[k]=[]; });
+    ['clientes','productos','compras','ventas','gastos'].forEach(k=>{ if(!Array.isArray(DB[k])) DB[k]=[]; });
     store.data = DB; store.save();
     this.applying = false;
     render();
@@ -509,7 +510,7 @@ window.addEventListener('hashchange',()=>{ const r=location.hash.replace('#','')
    ============================================================ */
 function renderView(){
   const v = $('#view');
-  const views = { dashboard:viewDashboard, ventas:viewVentas, compras:viewCompras, inventario:viewInventario, clientes:viewClientes, vencimientos:viewVencimientos, reportes:viewReportes };
+  const views = { dashboard:viewDashboard, ventas:viewVentas, compras:viewCompras, inventario:viewInventario, clientes:viewClientes, vencimientos:viewVencimientos, reportes:viewReportes, gastos:viewGastos };
   v.innerHTML = (views[route]||viewDashboard)();
 }
 
@@ -629,7 +630,7 @@ function viewDashboard(){
             </li>`).join('')}</ul>` : `<p class="text-sm text-slate-400 py-4 text-center">Sin productos próximos a vencer 🎉</p>`}
         </div>
         <div class="card p-4">
-          <div class="flex items-center justify-between mb-3"><h3 class="font-semibold">⚠️ Stock bajo</h3><button onclick="go('inventario')" class="text-xs text-brand-700 font-medium">Ver todo</button></div>
+          <div class="flex items-center justify-between mb-3"><h3 class="font-semibold">⚠️ Stock bajo</h3><button onclick="openReposicion()" class="text-xs text-brand-700 font-medium">📦 Pedido sugerido</button></div>
           ${bajoStock.length? `<ul class="space-y-2">${bajoStock.slice(0,5).map(p=>`
             <li class="flex items-center justify-between text-sm">
               <span class="truncate">${esc(p.nombre)}</span>
@@ -652,7 +653,8 @@ function viewClientes(){
           </div>
           <div class="flex flex-col gap-1 shrink-0">
             <button onclick="openCliente('${c.id}')" class="text-xs text-brand-700 font-medium px-2 py-1 hover:bg-brand-50 rounded-lg">Editar</button>
-            ${c.saldo>0?`<button onclick="abonar('${c.id}')" class="text-xs text-teal-700 font-medium px-2 py-1 hover:bg-teal-50 rounded-lg">Abonar</button>`:''}
+            ${c.saldo>0?`<button onclick="abonar('${c.id}')" class="text-xs text-teal-700 font-medium px-2 py-1 hover:bg-teal-50 rounded-lg">Abonar</button>
+            <button onclick="cobrarWA('${c.id}')" class="text-xs text-emerald-700 font-medium px-2 py-1 hover:bg-emerald-50 rounded-lg">Cobrar 📲</button>`:''}
           </div>
         </div>`).join('')}</div>` : empty('👥','Aún no tienes clientes. Agrega el primero.'));
 }
@@ -675,7 +677,7 @@ function viewInventario(){
       <td class="p-3 text-right"><button onclick="openProducto('${p.id}')" class="text-xs text-brand-700 font-medium">Editar</button></td>
     </tr>`;
   }).join('');
-  return pageHead('Inventario', `${ps.length} producto(s) · Valor venta: ${fmtMoney(DB.productos.reduce((s,p)=>s+stockDe(p)*p.precioVenta,0))}`, btnPrimary('+ Producto','openProducto()'))
+  return pageHead('Inventario', `${ps.length} producto(s) · Valor venta: ${fmtMoney(DB.productos.reduce((s,p)=>s+stockDe(p)*p.precioVenta,0))}`, btnGhost('📦 Reposición','openReposicion()') + btnPrimary('+ Producto','openProducto()'))
     + (ps.length? searchBar('listInventario','Buscar por nombre, categoría o código…') + `<div class="card overflow-x-auto"><table class="w-full text-sm">
         <thead><tr class="text-xs text-slate-400 text-left"><th class="p-3 font-medium">Producto</th><th class="p-3 font-medium text-right">Precio</th><th class="p-3 font-medium text-center">Stock</th><th class="p-3 font-medium text-center">Vence</th><th></th></tr></thead>
         <tbody id="listInventario">${filas}</tbody></table></div>` + noRes('listInventario') : empty('📦','Sin productos. Crea el primero para empezar a vender.'));
@@ -689,7 +691,7 @@ function viewVentas(){
         <div data-search="${sdata((getCliente(v.clienteId)?.nombre||'')+' '+fmtDate(v.fecha)+' '+v.fecha+' '+v.items.map(i=>getProducto(i.prodId)?.nombre||'').join(' '))}" class="card p-4 flex items-center justify-between gap-3">
           <div class="min-w-0">
             <div class="font-semibold">${fmtMoney(v.total)} ${v.fiado?'<span class="text-xs bg-amber-50 text-amber-700 px-2 py-0.5 rounded-full font-medium ml-1">Fiado</span>':''}</div>
-            <div class="text-xs text-slate-400 truncate">${fmtDate(v.fecha)} · ${v.items.reduce((s,i)=>s+i.cant,0)} artículo(s)${v.clienteId?` · ${esc(getCliente(v.clienteId)?.nombre||'')}`:''}</div>
+            <div class="text-xs text-slate-400 truncate">${fmtDate(v.fecha)} · ${v.items.reduce((s,i)=>s+i.cant,0)} artículo(s)${v.fiado?'':` · ${esc(v.metodo||'Efectivo')}`}${v.clienteId?` · ${esc(getCliente(v.clienteId)?.nombre||'')}`:''}</div>
           </div>
           <div class="text-right shrink-0">
             <div class="text-xs text-teal-600 font-medium">+${fmtMoney(v.ganancia)}</div>
@@ -755,12 +757,13 @@ function viewReportes(){
 
   const kpi=(l,v,c)=>`<div class="card p-4"><div class="text-xs text-slate-400 font-medium">${l}</div><div class="text-xl font-bold mt-1 ${c||''}">${v}</div></div>`;
 
-  return pageHead('Reportes', new Date().toLocaleDateString('es-CO',{month:'long',year:'numeric'})+' · este mes', btnGhost('🧾 Cierre de hoy','openCierre()'))
+  const gastosMes = DB.gastos.filter(g=>g.fecha.slice(0,7)===mes && g.tipo==='gasto').reduce((s,g)=>s+g.monto,0);
+  return pageHead('Reportes', new Date().toLocaleDateString('es-CO',{month:'long',year:'numeric'})+` · ${ventasMes.length} venta(s)`, btnGhost('💸 Gastos','go(\'gastos\')') + btnGhost('🧾 Cierre','openCierre()'))
     + `<div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
         ${kpi('Ventas del mes',fmtMoney(totalMes),'text-teal-600')}
         ${kpi('Ganancia estimada',fmtMoney(gananciaMes),'text-brand-700')}
         ${kpi('Compras del mes',fmtMoney(comprasMes),'text-slate-700')}
-        ${kpi('N° de ventas',fmtNum(ventasMes.length))}
+        ${kpi('Gastos del mes',fmtMoney(gastosMes),'text-rose-600')}
       </div>
       <div class="grid md:grid-cols-2 gap-4">
         <div class="card p-4">
@@ -827,7 +830,10 @@ function openCliente(id){
             <span class="text-slate-400">${fmtDate(m.fecha)} · ${m.tipo==='abono'?'Abonó':m.tipo==='fiado'?'Compró fiado':'Venta anulada'}</span>
             <span class="font-medium ${m.tipo==='fiado'?'text-amber-700':'text-teal-600'}">${m.tipo==='fiado'?'+':'−'}${fmtMoney(m.monto)}</span>
           </div>`).join('')}</div>
-        ${c.saldo>0?`<button type="button" onclick="abonar('${id}')" class="w-full mt-2 text-xs text-teal-700 font-medium border border-teal-200 rounded-lg py-1.5 hover:bg-teal-50">Registrar abono</button>`:''}
+        ${c.saldo>0?`<div class="flex gap-2 mt-2">
+          <button type="button" onclick="abonar('${id}')" class="flex-1 text-xs text-teal-700 font-medium border border-teal-200 rounded-lg py-1.5 hover:bg-teal-50">Registrar abono</button>
+          <button type="button" onclick="cobrarWA('${id}')" class="flex-1 text-xs text-emerald-700 font-medium border border-emerald-200 rounded-lg py-1.5 hover:bg-emerald-50">Recordar cobro 📲</button>
+        </div>`:''}
       </div>`:''}
       <div class="flex gap-2 mt-4">
         <button type="submit" class="flex-1 bg-brand hover:bg-brand-700 text-white font-semibold py-2.5 rounded-xl">Guardar</button>
@@ -842,6 +848,13 @@ function saveCliente(e,id){
   store.save(); closeModal(); render(); toast('Cliente guardado');
 }
 function delCliente(id){ if(!confirm('¿Eliminar este cliente?'))return; DB.clientes=DB.clientes.filter(c=>c.id!==id); store.save(); closeModal(); render(); toast('Cliente eliminado'); }
+function cobrarWA(id){
+  const c=getCliente(id); if(!c || !(c.saldo>0)) return;
+  let tel=(c.telefono||'').replace(/\D/g,'');
+  if(tel.length===10 && tel.startsWith('3')) tel='57'+tel; // celular colombiano
+  const txt=`Hola ${c.nombre} 👋, te saludamos de *${DB.config.negocio}*. Te recordamos que tienes un saldo pendiente de *${fmtMoney(c.saldo)}*. Cuando puedas pasar a ponerte al día, con gusto te atendemos. ¡Gracias! 🙏`;
+  window.open('https://wa.me/'+(tel||'')+'?text='+encodeURIComponent(txt),'_blank');
+}
 function abonar(id){
   const c=getCliente(id);
   const val=prompt(`${c.nombre} debe ${fmtMoney(c.saldo)}.\n¿Cuánto abona?`, c.saldo);
@@ -941,6 +954,7 @@ function ventaBody(){
         <button type="button" onclick="rmCarrito(${idx})" class="text-rose-400 text-lg px-1">×</button>
       </div>`;}).join('')}</div>` : `<p class="text-sm text-slate-400 text-center py-4">Agrega productos a la venta.</p>`}
     <div class="flex justify-between items-center text-lg font-bold border-t border-slate-100 pt-3 mb-3"><span>Total</span><span class="text-teal-600">${fmtMoney(total)}</span></div>
+    ${field('Método de pago',`<select id="vMetodo" class="${inputCls}"><option>Efectivo</option><option>Nequi</option><option>Daviplata</option><option>Tarjeta</option><option>Transferencia</option></select>`)}
     ${DB.clientes.length?field('Cliente (opcional)',`<select id="vCliente" class="${inputCls}"><option value="">Sin cliente</option>${clOpts}</select>`):''}
     <label class="flex items-center gap-2 mb-4 text-sm"><input type="checkbox" id="vFiado"> Venta fiada (queda como deuda del cliente)</label>
     <button type="button" onclick="confirmVenta()" ${carritoV.length?'':'disabled'} class="w-full bg-teal-600 disabled:opacity-40 hover:bg-teal-700 text-white font-semibold py-3 rounded-xl">Registrar venta · ${fmtMoney(total)}</button>`;
@@ -963,7 +977,8 @@ function confirmVenta(){
   const total=carritoV.reduce((s,i)=>s+i.cant*i.precio,0);
   const ganancia=carritoV.reduce((s,i)=>s+i.cant*(i.precio-(i.costo||0)),0);
   carritoV.forEach(i=>descontarStock(i.prodId,i.cant));
-  const venta={ id:uid(), fecha:todayISO(), creado:Date.now(), items:carritoV.map(i=>({prodId:i.prodId,cant:i.cant,precio:i.precio,costo:i.costo})), total, ganancia, fiado, clienteId:clienteId||null };
+  const metodo = fiado ? 'Fiado' : (($('#vMetodo')&&$('#vMetodo').value)||'Efectivo');
+  const venta={ id:uid(), fecha:todayISO(), creado:Date.now(), items:carritoV.map(i=>({prodId:i.prodId,cant:i.cant,precio:i.precio,costo:i.costo})), total, ganancia, fiado, metodo, clienteId:clienteId||null };
   DB.ventas.push(venta);
   if(fiado && clienteId){ const c=getCliente(clienteId); c.saldo=(c.saldo||0)+total; c.movs=c.movs||[]; c.movs.push({fecha:todayISO(),tipo:'fiado',monto:total}); }
   store.save(); closeModal(); render(); toast('Venta registrada ✔');
@@ -972,7 +987,7 @@ function confirmVenta(){
 function verVenta(id){
   const v=DB.ventas.find(x=>x.id===id); if(!v)return;
   openModal('Detalle de venta',
-    `<div class="text-sm text-slate-400 mb-3">${fmtDate(v.fecha)}${v.clienteId?` · ${esc(getCliente(v.clienteId)?.nombre||'')}`:''}${v.fiado?' · <span class="text-amber-600">Fiado</span>':''}</div>
+    `<div class="text-sm text-slate-400 mb-3">${fmtDate(v.fecha)}${v.clienteId?` · ${esc(getCliente(v.clienteId)?.nombre||'')}`:''}${v.fiado?' · <span class="text-amber-600">Fiado</span>':` · ${esc(v.metodo||'Efectivo')}`}</div>
      <div class="space-y-2 mb-3">${v.items.map(i=>{const p=getProducto(i.prodId);return `<div class="flex justify-between text-sm"><span>${esc(p?.nombre||'(eliminado)')} × ${i.cant}</span><span>${fmtMoney(i.cant*i.precio)}</span></div>`;}).join('')}</div>
      <div class="flex justify-between font-bold border-t border-slate-100 pt-2"><span>Total</span><span>${fmtMoney(v.total)}</span></div>
      <div class="flex justify-between text-sm text-teal-600 mt-1"><span>Ganancia</span><span>+${fmtMoney(v.ganancia)}</span></div>
@@ -987,7 +1002,7 @@ function verVenta(id){
 function reciboTexto(v){
   const cl = v.clienteId ? getCliente(v.clienteId) : null;
   const lineas = v.items.map(i=>{ const p=getProducto(i.prodId); return `• ${p?p.nombre:'(producto)'} x${i.cant} = ${fmtMoney(i.cant*i.precio)}`; });
-  return `🧾 *${DB.config.negocio}*\nRecibo de venta — ${fmtDate(v.fecha)}${cl?`\nCliente: ${cl.nombre}`:''}\n\n${lineas.join('\n')}\n\n*TOTAL: ${fmtMoney(v.total)}*${v.fiado?'\n(Venta fiada)':''}\n\n¡Gracias por su compra! 💊`;
+  return `🧾 *${DB.config.negocio}*\nRecibo de venta — ${fmtDate(v.fecha)}${cl?`\nCliente: ${cl.nombre}`:''}\n\n${lineas.join('\n')}\n\n*TOTAL: ${fmtMoney(v.total)}*\nPago: ${v.fiado?'Fiado':(v.metodo||'Efectivo')}\n\n¡Gracias por su compra! 💊`;
 }
 function waVenta(id){
   const v=DB.ventas.find(x=>x.id===id); if(!v) return;
@@ -1010,6 +1025,82 @@ function delVenta(id){
   DB.ventas=DB.ventas.filter(x=>x.id!==id); store.save(); closeModal(); render(); toast('Venta anulada');
 }
 
+/* ---------- SUGERENCIA DE REPOSICIÓN ---------- */
+function reposicionData(){
+  const desde = isoLocal(new Date(Date.now() - 30*86400000));
+  const vendidos = {};
+  DB.ventas.filter(v=>v.fecha>=desde).forEach(v=>v.items.forEach(i=>{ vendidos[i.prodId]=(vendidos[i.prodId]||0)+i.cant; }));
+  const items=[];
+  DB.productos.forEach(p=>{
+    const st=stockDe(p), v30=vendidos[p.id]||0;
+    const diario=v30/30;
+    const dias = diario>0 ? Math.round(st/diario) : null; // días que alcanza el stock al ritmo actual
+    if(st<=DB.config.alertaStock || (dias!==null && dias<=7)){
+      items.push({ p, st, v30, dias, sugerido: Math.max(1, Math.ceil(v30-st)) });
+    }
+  });
+  items.sort((a,b)=>a.st-b.st);
+  return items;
+}
+function pedidoTexto(items){
+  return `📦 *Pedido — ${DB.config.negocio}*\n${fmtDate(todayISO())}\n\n${items.map(i=>`• ${i.p.nombre} — ${i.sugerido} ${i.p.unidad||'u'}`).join('\n')}\n\n¡Gracias!`;
+}
+function openReposicion(){
+  const items=reposicionData();
+  if(!items.length){
+    return openModal('📦 Sugerencia de reposición', `<div class="text-center py-8"><div class="text-4xl mb-3">✅</div><p class="text-slate-500">Todo tiene stock suficiente según tus ventas de los últimos 30 días.</p></div>`);
+  }
+  openModal('📦 Sugerencia de reposición',
+    `<p class="text-xs text-slate-400 mb-3">Según tus ventas de los últimos 30 días y tu alerta de stock (≤${DB.config.alertaStock}). La cantidad sugerida cubre ~1 mes.</p>
+     <div class="space-y-2 mb-4 max-h-72 overflow-y-auto">${items.map(i=>`
+       <div class="flex items-center justify-between gap-2 bg-slate-50 rounded-xl p-2.5">
+         <div class="min-w-0">
+           <div class="text-sm font-medium truncate">${esc(i.p.nombre)}</div>
+           <div class="text-xs text-slate-400">Stock: <b class="${i.st===0?'text-rose-600':'text-amber-600'}">${i.st}</b> · Vendido 30d: ${i.v30}${i.dias!==null?` · alcanza ~${i.dias} día(s)`:''}</div>
+         </div>
+         <div class="shrink-0 text-sm font-bold text-brand-700">${i.sugerido} ${esc(i.p.unidad||'u')}</div>
+       </div>`).join('')}</div>
+     <button onclick="window.open('https://wa.me/?text='+encodeURIComponent(pedidoTexto(reposicionData())),'_blank')" class="w-full bg-teal-600 hover:bg-teal-700 text-white font-semibold py-2.5 rounded-xl">📲 Enviar pedido por WhatsApp</button>`,'lg');
+}
+
+/* ---------- GASTOS E INGRESOS ---------- */
+function viewGastos(){
+  const mes = todayISO().slice(0,7);
+  const gs = DB.gastos.slice().sort((a,b)=> b.fecha<a.fecha?-1: b.fecha>a.fecha?1: (b.creado||0)-(a.creado||0));
+  const gastosMes = gs.filter(g=>g.fecha.slice(0,7)===mes && g.tipo==='gasto').reduce((s,g)=>s+g.monto,0);
+  const ingresosMes = gs.filter(g=>g.fecha.slice(0,7)===mes && g.tipo==='ingreso').reduce((s,g)=>s+g.monto,0);
+  return pageHead('Gastos e ingresos', `Este mes: gastos ${fmtMoney(gastosMes)}${ingresosMes?` · ingresos extra ${fmtMoney(ingresosMes)}`:''}`, btnPrimary('+ Movimiento','openGasto()'))
+    + (gs.length? searchBar('listGastos','Buscar por categoría o descripción…') + noRes('listGastos') + `<div id="listGastos" class="space-y-2">${gs.map(g=>`
+        <div data-search="${sdata((g.categoria||'')+' '+(g.descripcion||''))}" class="card p-4 flex items-center justify-between gap-3">
+          <div class="min-w-0">
+            <div class="font-semibold ${g.tipo==='gasto'?'text-rose-600':'text-teal-600'}">${g.tipo==='gasto'?'−':'+'}${fmtMoney(g.monto)} <span class="text-xs font-normal text-slate-400 ml-1">${esc(g.categoria||'')}</span></div>
+            <div class="text-xs text-slate-400 truncate">${fmtDate(g.fecha)}${g.descripcion?` · ${esc(g.descripcion)}`:''}</div>
+          </div>
+          <button onclick="delGasto('${g.id}')" class="text-xs text-rose-400 shrink-0 px-2 py-1 hover:bg-rose-50 rounded-lg">Eliminar</button>
+        </div>`).join('')}</div>` : empty('💸','Sin movimientos. Registra gastos (arriendo, servicios…) o ingresos extra.'));
+}
+function openGasto(){
+  openModal('Nuevo movimiento',
+    `<form onsubmit="return saveGasto(event)">
+      <div class="grid grid-cols-2 gap-2">
+        ${field('Tipo',`<select name="tipo" class="${inputCls}"><option value="gasto">💸 Gasto</option><option value="ingreso">💰 Ingreso extra</option></select>`)}
+        ${field('Monto *',`<input name="monto" type="number" min="1" step="any" required class="${inputCls}" placeholder="0">`)}
+      </div>
+      ${field('Categoría',`<select name="categoria" class="${inputCls}"><option>Arriendo</option><option>Servicios públicos</option><option>Nómina</option><option>Transporte</option><option>Impuestos</option><option>Aseo y varios</option><option>Otro</option></select>`)}
+      ${field('Descripción (opcional)',`<input name="descripcion" class="${inputCls}" placeholder="Ej: recibo de la luz">`)}
+      ${field('Fecha',`<input name="fecha" type="date" value="${todayISO()}" class="${inputCls}">`)}
+      <button type="submit" class="w-full bg-brand hover:bg-brand-700 text-white font-semibold py-2.5 rounded-xl mt-2">Guardar</button>
+    </form>`);
+}
+function saveGasto(e){
+  e.preventDefault(); const f=e.target;
+  const monto=+f.monto.value||0; if(monto<=0) return toast('Monto inválido','err'), false;
+  DB.gastos.push({ id:uid(), tipo:f.tipo.value, monto, categoria:f.categoria.value, descripcion:f.descripcion.value.trim(), fecha:f.fecha.value||todayISO(), creado:Date.now() });
+  store.save(); closeModal(); go('gastos'); toast('Movimiento guardado');
+  return false;
+}
+function delGasto(id){ if(!confirm('¿Eliminar este movimiento?'))return; DB.gastos=DB.gastos.filter(g=>g.id!==id); store.save(); render(); toast('Movimiento eliminado'); }
+
 /* ----- Cierre de caja ----- */
 function cierreDatos(){
   const hoy=todayISO();
@@ -1017,26 +1108,36 @@ function cierreDatos(){
   const total=vs.reduce((s,v)=>s+v.total,0);
   const fiado=vs.filter(v=>v.fiado).reduce((s,v)=>s+v.total,0);
   const ganancia=vs.reduce((s,v)=>s+(v.ganancia||0),0);
+  const porMetodo={};
+  vs.filter(v=>!v.fiado).forEach(v=>{ const m=v.metodo||'Efectivo'; porMetodo[m]=(porMetodo[m]||0)+v.total; });
   const abonos=DB.clientes.reduce((s,c)=>s+(c.movs||[]).filter(m=>m.tipo==='abono'&&m.fecha===hoy).reduce((x,m)=>x+m.monto,0),0);
   const compras=DB.compras.filter(c=>c.fecha===hoy).reduce((s,c)=>s+c.total,0);
-  return { hoy, n:vs.length, total, fiado, contado:total-fiado, ganancia, abonos, compras, efectivo:(total-fiado)+abonos };
+  const gastosHoy=DB.gastos.filter(g=>g.fecha===hoy&&g.tipo==='gasto').reduce((s,g)=>s+g.monto,0);
+  const ingresosHoy=DB.gastos.filter(g=>g.fecha===hoy&&g.tipo==='ingreso').reduce((s,g)=>s+g.monto,0);
+  return { hoy, n:vs.length, total, fiado, contado:total-fiado, porMetodo, ganancia, abonos, compras, gastosHoy, ingresosHoy, caja:(total-fiado)+abonos+ingresosHoy-gastosHoy };
 }
 function cierreTexto(){
   const d=cierreDatos();
-  return `🧾 *${DB.config.negocio}* — Cierre de caja ${fmtDate(d.hoy)}\n\nVentas: ${d.n} por ${fmtMoney(d.total)}\n• De contado: ${fmtMoney(d.contado)}\n• Fiado: ${fmtMoney(d.fiado)}\nAbonos recibidos: ${fmtMoney(d.abonos)}\n\n💵 Efectivo del día: ${fmtMoney(d.efectivo)}\n📈 Ganancia estimada: ${fmtMoney(d.ganancia)}\n🛒 Compras del día: ${fmtMoney(d.compras)}`;
+  const metodos=Object.entries(d.porMetodo).map(([m,v])=>`   - ${m}: ${fmtMoney(v)}`).join('\n');
+  return `🧾 *${DB.config.negocio}* — Cierre de caja ${fmtDate(d.hoy)}\n\nVentas: ${d.n} por ${fmtMoney(d.total)}\n• De contado: ${fmtMoney(d.contado)}${metodos?`\n${metodos}`:''}\n• Fiado: ${fmtMoney(d.fiado)}\nAbonos recibidos: ${fmtMoney(d.abonos)}${d.ingresosHoy?`\nIngresos extra: ${fmtMoney(d.ingresosHoy)}`:''}\nGastos del día: ${fmtMoney(d.gastosHoy)}\n\n💵 Caja del día: ${fmtMoney(d.caja)}\n📈 Ganancia estimada: ${fmtMoney(d.ganancia)}\n🛒 Compras del día: ${fmtMoney(d.compras)}`;
 }
 function openCierre(){
   const d=cierreDatos();
   const fila=(l,v,c)=>`<div class="flex justify-between text-sm py-2 border-b border-slate-50"><span class="text-slate-500">${l}</span><span class="font-semibold ${c||''}">${v}</span></div>`;
+  const metodosHtml=Object.entries(d.porMetodo).map(([m,v])=>`<div class="flex justify-between text-xs py-1 pl-4 text-slate-400"><span>${esc(m)}</span><span>${fmtMoney(v)}</span></div>`).join('');
   openModal('🧾 Cierre de caja — hoy',
     fila('Ventas del día',`${d.n} venta(s) · ${fmtMoney(d.total)}`)
     +fila('De contado',fmtMoney(d.contado))
+    +metodosHtml
     +fila('Fiado',fmtMoney(d.fiado),'text-amber-600')
     +fila('Abonos recibidos',fmtMoney(d.abonos),'text-teal-600')
-    +fila('💵 Efectivo del día',fmtMoney(d.efectivo),'text-teal-700')
+    +(d.ingresosHoy?fila('Ingresos extra',fmtMoney(d.ingresosHoy),'text-teal-600'):'')
+    +fila('Gastos del día',`−${fmtMoney(d.gastosHoy)}`,'text-rose-600')
+    +fila('💵 Caja del día',fmtMoney(d.caja),'text-teal-700')
     +fila('Ganancia estimada',fmtMoney(d.ganancia),'text-brand-700')
     +fila('Compras del día',fmtMoney(d.compras))
-    +`<div class="flex gap-2 mt-4">
+    +`<button onclick="openGasto()" class="w-full mt-3 text-xs text-slate-500 border border-slate-200 rounded-xl py-2 hover:bg-slate-50">💸 Registrar un gasto de hoy</button>
+     <div class="flex gap-2 mt-2">
        <button onclick="window.open('https://wa.me/?text='+encodeURIComponent(cierreTexto()),'_blank')" class="flex-1 bg-teal-600 hover:bg-teal-700 text-white py-2.5 rounded-xl text-sm font-semibold">📲 WhatsApp</button>
        <button onclick="printCierre()" class="flex-1 border border-slate-200 hover:bg-slate-50 py-2.5 rounded-xl text-sm">🖨️ Imprimir</button>
      </div>`);
