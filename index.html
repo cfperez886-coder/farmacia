@@ -10,6 +10,7 @@
 <script src="https://cdn.tailwindcss.com"></script>
 <script>
   tailwind.config = {
+    darkMode: 'class',
     theme: { extend: { colors: {
       brand: { DEFAULT:'#6d28d9', 50:'#f5f3ff',100:'#ede9fe',600:'#7c3aed',700:'#6d28d9' },
       teal: { DEFAULT:'#0d9488' }
@@ -19,12 +20,44 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
   html,body{ -webkit-tap-highlight-color: transparent; }
+  body{ transition: background-color .25s, color .25s }
   ::-webkit-scrollbar{ width:8px; height:8px } ::-webkit-scrollbar-thumb{ background:#cbd5e1; border-radius:8px }
-  .card{ background:#fff; border:1px solid #eef0f4; border-radius:16px }
+  html.dark ::-webkit-scrollbar-thumb{ background:#475569 }
+  .card{ background:#fff; border:1px solid #eef0f4; border-radius:16px; box-shadow:0 1px 3px rgba(15,23,42,.05); transition: background-color .25s, border-color .25s }
   input,select,textarea{ outline:none }
   .fade{ animation: fade .18s ease }
   @keyframes fade{ from{opacity:0; transform:translateY(4px)} to{opacity:1; transform:none} }
   [data-tab]{ transition: color .15s }
+  .grad-brand{ background:linear-gradient(160deg,#7c3aed,#4c1d95) }
+
+  /* ---------- TEMA OSCURO (sobrescribe utilidades de color) ---------- */
+  html.dark body{ background-color:#0b1220; color:#e2e8f0 }
+  html.dark .bg-slate-50{ background-color:#0b1220 !important }
+  html.dark .card{ background:#151e31; border-color:#26324a; box-shadow:0 1px 3px rgba(0,0,0,.4) }
+  html.dark .bg-white{ background-color:#151e31 !important }
+  html.dark .bg-white\/90{ background-color:rgba(21,30,49,.92) !important }
+  html.dark .bg-slate-100{ background-color:#26324a !important }
+  html.dark .text-slate-800{ color:#e2e8f0 !important }
+  html.dark .text-slate-700{ color:#cbd5e1 !important }
+  html.dark .text-slate-500{ color:#9aa8bd !important }
+  html.dark .text-slate-400{ color:#8291a9 !important }
+  html.dark .text-slate-300{ color:#5b6a82 !important }
+  html.dark .border-slate-100{ border-color:#26324a !important }
+  html.dark .border-slate-200{ border-color:#334261 !important }
+  html.dark .border-slate-50{ border-color:#1c2740 !important }
+  html.dark .hover\:bg-slate-50:hover{ background-color:#1c2740 !important }
+  html.dark .hover\:bg-slate-100:hover{ background-color:#26324a !important }
+  html.dark input, html.dark select, html.dark textarea{ background-color:#0b1220; border-color:#334261; color:#e2e8f0 }
+  html.dark .bg-brand-50{ background-color:rgba(124,58,237,.22) !important }
+  html.dark .hover\:bg-brand-50:hover{ background-color:rgba(124,58,237,.3) !important }
+  html.dark .text-brand-700{ color:#c4b5fd !important }
+  html.dark .bg-amber-50{ background-color:rgba(245,158,11,.15) !important }
+  html.dark .text-amber-700{ color:#fbbf24 !important }
+  html.dark .bg-teal-50{ background-color:rgba(13,148,136,.16) !important }
+  html.dark .hover\:bg-teal-50:hover{ background-color:rgba(13,148,136,.24) !important }
+  html.dark .hover\:bg-emerald-50:hover{ background-color:rgba(16,185,129,.2) !important }
+  html.dark .bg-rose-50{ background-color:rgba(244,63,94,.15) !important }
+  html.dark .hover\:bg-rose-50:hover{ background-color:rgba(244,63,94,.22) !important }
 </style>
 
 <body class="bg-slate-50 text-slate-800 antialiased">
@@ -292,11 +325,11 @@ const cloud = {
 /* ---- Interfaz de la nube ---- */
 function cuentaAbierta(){ return !!(modal && modal.title && modal.title.indexOf('Cuenta y sincroniz') >= 0); }
 function cloudStatusInfo(){
-  if(!cloud.ready) return { icon:'☁️', text:'Sin conexión', hex:'#94a3b8' };
-  if(!cloud.user) return { icon:'☁️', text:'Conectar nube', hex:'#94a3b8' };
-  if(cloud.status==='sync') return { icon:'🔄', text:'Sincronizando…', hex:'#d97706' };
-  if(cloud.status==='error') return { icon:'⚠️', text:'Error de sync', hex:'#e11d48' };
-  return { icon:'✅', text:'Sincronizado', hex:'#0d9488' };
+  if(!cloud.ready) return { icon:'☁️', text:'Sin conexión', hex:'#e9d5ff' };
+  if(!cloud.user) return { icon:'☁️', text:'Conectar nube', hex:'#e9d5ff' };
+  if(cloud.status==='sync') return { icon:'🔄', text:'Sincronizando…', hex:'#fbbf24' };
+  if(cloud.status==='error') return { icon:'⚠️', text:'Error de sync', hex:'#fb7185' };
+  return { icon:'✅', text:'Sincronizado', hex:'#34d399' };
 }
 function updateCloudBadges(){
   const info = cloudStatusInfo();
@@ -433,6 +466,15 @@ function toast(msg, type='ok'){
   setTimeout(()=>{ t.style.transition='opacity .3s'; t.style.opacity='0'; setTimeout(()=>t.remove(),300); }, 1800);
 }
 
+/* ---------- Tema claro / oscuro ---------- */
+function getTheme(){ return localStorage.getItem('miNegocio_theme') || (window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'); }
+function applyTheme(){
+  const dark = getTheme()==='dark';
+  document.documentElement.classList.toggle('dark', dark);
+  const m = document.querySelector('meta[name=theme-color]'); if(m) m.content = dark ? '#0b1220' : '#6d28d9';
+}
+function toggleTheme(){ localStorage.setItem('miNegocio_theme', getTheme()==='dark' ? 'light' : 'dark'); applyTheme(); render(); }
+
 /* ============================================================
    NAVEGACIÓN / LAYOUT
    ============================================================ */
@@ -457,26 +499,28 @@ function render(){
   app.innerHTML = `
   <div class="min-h-screen flex flex-col md:flex-row">
     <!-- Sidebar (desktop) -->
-    <aside class="hidden md:flex md:w-60 flex-col bg-white border-r border-slate-100 p-4 sticky top-0 h-screen">
+    <aside class="hidden md:flex md:w-60 flex-col grad-brand text-white p-4 sticky top-0 h-screen">
       <div class="flex items-center gap-2 px-2 py-3 mb-2">
-        <div class="w-9 h-9 rounded-xl bg-brand text-white grid place-items-center text-lg">🧾</div>
-        <div><div class="font-bold leading-tight">${esc(DB.config.negocio)}</div><div class="text-[11px] text-slate-400">Gestión de negocio</div></div>
+        <div class="w-9 h-9 rounded-xl bg-white/20 grid place-items-center text-lg">💊</div>
+        <div><div class="font-bold leading-tight">${esc(DB.config.negocio)}</div><div class="text-[11px] text-white/50">Gestión de farmacia</div></div>
       </div>
       <nav class="flex-1 space-y-1">
         ${NAV.map(n=>navBtn(n,false)).join('')}
       </nav>
-      <button onclick="openCuenta()" class="mt-2 text-left px-3 py-2.5 rounded-xl text-sm hover:bg-slate-50 flex items-center gap-3"><span class="cloudBadgeInner" style="color:#94a3b8">☁️ Nube</span></button>
-      <button onclick="openConfig()" class="text-left px-3 py-2.5 rounded-xl text-sm text-slate-500 hover:bg-slate-50 flex items-center gap-3">⚙️ <span>Ajustes</span></button>
+      <button onclick="openCuenta()" class="mt-2 text-left px-3 py-2.5 rounded-xl text-sm hover:bg-white/10 flex items-center gap-3"><span class="cloudBadgeInner" style="color:#e9d5ff">☁️ Nube</span></button>
+      <button onclick="toggleTheme()" class="text-left px-3 py-2.5 rounded-xl text-sm text-white/80 hover:bg-white/10 flex items-center gap-3">${getTheme()==='dark'?'☀️ <span>Tema claro</span>':'🌙 <span>Tema oscuro</span>'}</button>
+      <button onclick="openConfig()" class="text-left px-3 py-2.5 rounded-xl text-sm text-white/80 hover:bg-white/10 flex items-center gap-3">⚙️ <span>Ajustes</span></button>
     </aside>
 
     <!-- Main -->
     <main class="flex-1 pb-24 md:pb-8">
       <!-- Topbar mobile -->
-      <header class="md:hidden sticky top-0 z-20 bg-white/90 backdrop-blur border-b border-slate-100 px-4 h-14 flex items-center justify-between">
-        <div class="flex items-center gap-2"><div class="w-8 h-8 rounded-lg bg-brand text-white grid place-items-center">🧾</div><span class="font-bold">${esc(DB.config.negocio)}</span></div>
+      <header class="md:hidden sticky top-0 z-20 grad-brand text-white px-4 h-14 flex items-center justify-between shadow-md">
+        <div class="flex items-center gap-2"><div class="w-8 h-8 rounded-lg bg-white/20 grid place-items-center">💊</div><span class="font-bold">${esc(DB.config.negocio)}</span></div>
         <div class="flex items-center gap-3">
-          <button onclick="openCuenta()" class="text-xs"><span class="cloudBadgeInner" style="color:#94a3b8">☁️</span></button>
-          <button onclick="openConfig()" class="text-slate-400 text-xl">⚙️</button>
+          <button onclick="toggleTheme()" class="text-lg">${getTheme()==='dark'?'☀️':'🌙'}</button>
+          <button onclick="openCuenta()" class="text-xs"><span class="cloudBadgeInner" style="color:#e9d5ff">☁️</span></button>
+          <button onclick="openConfig()" class="text-white/80 text-xl">⚙️</button>
         </div>
       </header>
       <div id="view" class="max-w-5xl mx-auto p-4 md:p-6 fade"></div>
@@ -495,7 +539,7 @@ function render(){
 function navBtn(n){
   const active = route===n.id;
   const badge = n.id==='vencimientos' && alertsCount()>0 ? `<span class="ml-auto text-[10px] bg-rose-500 text-white rounded-full px-1.5 py-0.5">${alertsCount()}</span>` : '';
-  return `<button data-tab onclick="go('${n.id}')" class="w-full text-left px-3 py-2.5 rounded-xl text-sm flex items-center gap-3 ${active?'bg-brand-50 text-brand-700 font-semibold':'text-slate-500 hover:bg-slate-50'}">${n.icon} <span>${n.label}</span>${badge}</button>`;
+  return `<button data-tab onclick="go('${n.id}')" class="w-full text-left px-3 py-2.5 rounded-xl text-sm flex items-center gap-3 ${active?'bg-white/20 text-white font-semibold shadow-sm':'text-white/70 hover:bg-white/10 hover:text-white'}">${n.icon} <span>${n.label}</span>${badge}</button>`;
 }
 function navBtnMobile(n){
   const active = route===n.id;
@@ -519,7 +563,7 @@ function pageHead(title, sub, actionsHtml=''){
     <div><h1 class="text-xl md:text-2xl font-bold">${title}</h1>${sub?`<p class="text-sm text-slate-400 mt-0.5">${sub}</p>`:''}</div>
     <div class="flex gap-2 shrink-0">${actionsHtml}</div></div>`;
 }
-const btnPrimary = (label,onclick) => `<button onclick="${onclick}" class="bg-brand hover:bg-brand-700 text-white text-sm font-semibold px-4 py-2.5 rounded-xl shadow-sm">${label}</button>`;
+const btnPrimary = (label,onclick) => `<button onclick="${onclick}" class="bg-gradient-to-r from-violet-600 to-purple-700 hover:from-violet-500 hover:to-purple-600 text-white text-sm font-semibold px-4 py-2.5 rounded-xl shadow-lg shadow-violet-600/25 transition-transform hover:scale-[1.02]">${label}</button>`;
 const btnGhost = (label,onclick) => `<button onclick="${onclick}" class="bg-white border border-slate-200 hover:bg-slate-50 text-sm font-medium px-4 py-2.5 rounded-xl">${label}</button>`;
 const empty = (icon,msg) => `<div class="text-center py-16 text-slate-400"><div class="text-5xl mb-3">${icon}</div><p>${msg}</p></div>`;
 
@@ -610,15 +654,15 @@ function viewDashboard(){
   DB.productos.forEach(p=>(p.lotes||[]).forEach(l=>{ const d=daysUntil(l.venc); if(l.venc && d!==null && d<=DB.config.alertaVencimiento) porVencer.push({p,l,d}); }));
   porVencer.sort((a,b)=>a.d-b.d);
 
-  const kpi = (label,val,sub,color)=>`<div class="card p-4"><div class="text-xs text-slate-400 font-medium">${label}</div><div class="text-2xl font-bold mt-1 ${color||''}">${val}</div>${sub?`<div class="text-xs text-slate-400 mt-0.5">${sub}</div>`:''}</div>`;
+  const kpi = (icon,label,val,sub,color)=>`<div class="card p-4 relative overflow-hidden"><span class="absolute -right-1 -top-1 text-4xl opacity-10 select-none">${icon}</span><div class="text-xs text-slate-400 font-medium">${label}</div><div class="text-2xl font-bold mt-1 ${color||''}">${val}</div>${sub?`<div class="text-xs text-slate-400 mt-0.5">${sub}</div>`:''}</div>`;
 
   return pageHead(`Hola 👋`, new Date().toLocaleDateString('es-CO',{weekday:'long',day:'numeric',month:'long'}),
       btnGhost('🧾 Cierre','openCierre()') + btnPrimary('+ Nueva venta','openVenta()'))
     + `<div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
-        ${kpi('Ventas de hoy', fmtMoney(totalHoy), `${ventasHoy.length} venta(s)`,'text-teal-600')}
-        ${kpi('Ventas del mes', fmtMoney(totalMes), `Ganancia: ${fmtMoney(gananciaMes)}`)}
-        ${kpi('Por cobrar (fiado)', fmtMoney(fiadoTotal), `${DB.clientes.filter(c=>c.saldo>0).length} cliente(s)`,'text-amber-600')}
-        ${kpi('Valor inventario', fmtMoney(valorInv), `${DB.productos.length} producto(s)`)}
+        ${kpi('💵','Ventas de hoy', fmtMoney(totalHoy), `${ventasHoy.length} venta(s)`,'text-teal-600')}
+        ${kpi('📅','Ventas del mes', fmtMoney(totalMes), `Ganancia: ${fmtMoney(gananciaMes)}`)}
+        ${kpi('🤝','Por cobrar (fiado)', fmtMoney(fiadoTotal), `${DB.clientes.filter(c=>c.saldo>0).length} cliente(s)`,'text-amber-600')}
+        ${kpi('📦','Valor inventario', fmtMoney(valorInv), `${DB.productos.length} producto(s)`)}
       </div>
       <div class="grid md:grid-cols-2 gap-4">
         <div class="card p-4">
@@ -755,15 +799,15 @@ function viewReportes(){
   const dias=[]; for(let i=6;i>=0;i--){ const d=new Date(); d.setDate(d.getDate()-i); const iso=isoLocal(d); dias.push({iso,label:d.toLocaleDateString('es-CO',{weekday:'short'}),total:DB.ventas.filter(v=>v.fecha===iso).reduce((s,v)=>s+v.total,0)}); }
   const maxDia=Math.max(1,...dias.map(d=>d.total));
 
-  const kpi=(l,v,c)=>`<div class="card p-4"><div class="text-xs text-slate-400 font-medium">${l}</div><div class="text-xl font-bold mt-1 ${c||''}">${v}</div></div>`;
+  const kpi=(icon,l,v,c)=>`<div class="card p-4 relative overflow-hidden"><span class="absolute -right-1 -top-1 text-4xl opacity-10 select-none">${icon}</span><div class="text-xs text-slate-400 font-medium">${l}</div><div class="text-xl font-bold mt-1 ${c||''}">${v}</div></div>`;
 
   const gastosMes = DB.gastos.filter(g=>g.fecha.slice(0,7)===mes && g.tipo==='gasto').reduce((s,g)=>s+g.monto,0);
   return pageHead('Reportes', new Date().toLocaleDateString('es-CO',{month:'long',year:'numeric'})+` · ${ventasMes.length} venta(s)`, btnGhost('💸 Gastos','go(\'gastos\')') + btnGhost('🧾 Cierre','openCierre()'))
     + `<div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
-        ${kpi('Ventas del mes',fmtMoney(totalMes),'text-teal-600')}
-        ${kpi('Ganancia estimada',fmtMoney(gananciaMes),'text-brand-700')}
-        ${kpi('Compras del mes',fmtMoney(comprasMes),'text-slate-700')}
-        ${kpi('Gastos del mes',fmtMoney(gastosMes),'text-rose-600')}
+        ${kpi('💵','Ventas del mes',fmtMoney(totalMes),'text-teal-600')}
+        ${kpi('📈','Ganancia estimada',fmtMoney(gananciaMes),'text-brand-700')}
+        ${kpi('🛒','Compras del mes',fmtMoney(comprasMes),'text-slate-700')}
+        ${kpi('💸','Gastos del mes',fmtMoney(gastosMes),'text-rose-600')}
       </div>
       <div class="grid md:grid-cols-2 gap-4">
         <div class="card p-4">
@@ -1243,6 +1287,7 @@ function importData(){
 function resetData(){ if(!confirm('Esto borrará TODOS los datos. ¿Continuar?'))return; localStorage.removeItem(store.key); location.reload(); }
 
 /* ---------- Arranque ---------- */
+applyTheme();
 render();
 cloud.init();
 // PWA: cachea la app para funcionar sin internet
