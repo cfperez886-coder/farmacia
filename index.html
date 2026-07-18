@@ -3,7 +3,7 @@
 <title>Mi Negocio — Gestión</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧾</text></svg>">
 <link rel="manifest" href="manifest.json">
-<meta name="theme-color" content="#6d28d9">
+<meta name="theme-color" content="#1e40af">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -12,7 +12,7 @@
   tailwind.config = {
     darkMode: 'class',
     theme: { extend: { colors: {
-      brand: { DEFAULT:'#6d28d9', 50:'#f5f3ff',100:'#ede9fe',600:'#7c3aed',700:'#6d28d9' },
+      brand: { DEFAULT:'#2563eb', 50:'#eff6ff',100:'#dbeafe',600:'#2563eb',700:'#1d4ed8' },
       teal: { DEFAULT:'#0d9488' }
     }}}
   }
@@ -28,7 +28,7 @@
   .fade{ animation: fade .18s ease }
   @keyframes fade{ from{opacity:0; transform:translateY(4px)} to{opacity:1; transform:none} }
   [data-tab]{ transition: color .15s }
-  .grad-brand{ background:linear-gradient(160deg,#7c3aed,#4c1d95) }
+  .grad-brand{ background:linear-gradient(160deg,#2563eb,#1e3a8a) }
 
   /* ---------- TEMA OSCURO (sobrescribe utilidades de color) ---------- */
   html.dark body{ background-color:#0b1220; color:#e2e8f0 }
@@ -37,20 +37,20 @@
   html.dark .bg-white{ background-color:#151e31 !important }
   html.dark .bg-white\/90{ background-color:rgba(21,30,49,.92) !important }
   html.dark .bg-slate-100{ background-color:#26324a !important }
-  html.dark .text-slate-800{ color:#e2e8f0 !important }
-  html.dark .text-slate-700{ color:#cbd5e1 !important }
-  html.dark .text-slate-500{ color:#9aa8bd !important }
-  html.dark .text-slate-400{ color:#8291a9 !important }
-  html.dark .text-slate-300{ color:#5b6a82 !important }
+  html.dark .text-slate-800{ color:#f1f5f9 !important }
+  html.dark .text-slate-700{ color:#dde5ef !important }
+  html.dark .text-slate-500{ color:#b7c3d4 !important }
+  html.dark .text-slate-400{ color:#9fadc2 !important }
+  html.dark .text-slate-300{ color:#6b7a92 !important }
   html.dark .border-slate-100{ border-color:#26324a !important }
   html.dark .border-slate-200{ border-color:#334261 !important }
   html.dark .border-slate-50{ border-color:#1c2740 !important }
   html.dark .hover\:bg-slate-50:hover{ background-color:#1c2740 !important }
   html.dark .hover\:bg-slate-100:hover{ background-color:#26324a !important }
   html.dark input, html.dark select, html.dark textarea{ background-color:#0b1220; border-color:#334261; color:#e2e8f0 }
-  html.dark .bg-brand-50{ background-color:rgba(124,58,237,.22) !important }
-  html.dark .hover\:bg-brand-50:hover{ background-color:rgba(124,58,237,.3) !important }
-  html.dark .text-brand-700{ color:#c4b5fd !important }
+  html.dark .bg-brand-50{ background-color:rgba(59,130,246,.22) !important }
+  html.dark .hover\:bg-brand-50:hover{ background-color:rgba(59,130,246,.3) !important }
+  html.dark .text-brand-700{ color:#93c5fd !important }
   html.dark .bg-amber-50{ background-color:rgba(245,158,11,.15) !important }
   html.dark .text-amber-700{ color:#fbbf24 !important }
   html.dark .bg-teal-50{ background-color:rgba(13,148,136,.16) !important }
@@ -325,8 +325,8 @@ const cloud = {
 /* ---- Interfaz de la nube ---- */
 function cuentaAbierta(){ return !!(modal && modal.title && modal.title.indexOf('Cuenta y sincroniz') >= 0); }
 function cloudStatusInfo(){
-  if(!cloud.ready) return { icon:'☁️', text:'Sin conexión', hex:'#e9d5ff' };
-  if(!cloud.user) return { icon:'☁️', text:'Conectar nube', hex:'#e9d5ff' };
+  if(!cloud.ready) return { icon:'☁️', text:'Sin conexión', hex:'#dbeafe' };
+  if(!cloud.user) return { icon:'☁️', text:'Conectar nube', hex:'#dbeafe' };
   if(cloud.status==='sync') return { icon:'🔄', text:'Sincronizando…', hex:'#fbbf24' };
   if(cloud.status==='error') return { icon:'⚠️', text:'Error de sync', hex:'#fb7185' };
   return { icon:'✅', text:'Sincronizado', hex:'#34d399' };
@@ -471,7 +471,7 @@ function getTheme(){ return localStorage.getItem('miNegocio_theme') || (window.m
 function applyTheme(){
   const dark = getTheme()==='dark';
   document.documentElement.classList.toggle('dark', dark);
-  const m = document.querySelector('meta[name=theme-color]'); if(m) m.content = dark ? '#0b1220' : '#6d28d9';
+  const m = document.querySelector('meta[name=theme-color]'); if(m) m.content = dark ? '#0b1220' : '#1e40af';
 }
 function toggleTheme(){ localStorage.setItem('miNegocio_theme', getTheme()==='dark' ? 'light' : 'dark'); applyTheme(); render(); }
 
@@ -507,7 +507,7 @@ function render(){
       <nav class="flex-1 space-y-1">
         ${NAV.map(n=>navBtn(n,false)).join('')}
       </nav>
-      <button onclick="openCuenta()" class="mt-2 text-left px-3 py-2.5 rounded-xl text-sm hover:bg-white/10 flex items-center gap-3"><span class="cloudBadgeInner" style="color:#e9d5ff">☁️ Nube</span></button>
+      <button onclick="openCuenta()" class="mt-2 text-left px-3 py-2.5 rounded-xl text-sm hover:bg-white/10 flex items-center gap-3"><span class="cloudBadgeInner" style="color:#dbeafe">☁️ Nube</span></button>
       <button onclick="toggleTheme()" class="text-left px-3 py-2.5 rounded-xl text-sm text-white/80 hover:bg-white/10 flex items-center gap-3">${getTheme()==='dark'?'☀️ <span>Tema claro</span>':'🌙 <span>Tema oscuro</span>'}</button>
       <button onclick="openConfig()" class="text-left px-3 py-2.5 rounded-xl text-sm text-white/80 hover:bg-white/10 flex items-center gap-3">⚙️ <span>Ajustes</span></button>
     </aside>
@@ -519,7 +519,7 @@ function render(){
         <div class="flex items-center gap-2"><div class="w-8 h-8 rounded-lg bg-white/20 grid place-items-center">💊</div><span class="font-bold">${esc(DB.config.negocio)}</span></div>
         <div class="flex items-center gap-3">
           <button onclick="toggleTheme()" class="text-lg">${getTheme()==='dark'?'☀️':'🌙'}</button>
-          <button onclick="openCuenta()" class="text-xs"><span class="cloudBadgeInner" style="color:#e9d5ff">☁️</span></button>
+          <button onclick="openCuenta()" class="text-xs"><span class="cloudBadgeInner" style="color:#dbeafe">☁️</span></button>
           <button onclick="openConfig()" class="text-white/80 text-xl">⚙️</button>
         </div>
       </header>
@@ -563,7 +563,7 @@ function pageHead(title, sub, actionsHtml=''){
     <div><h1 class="text-xl md:text-2xl font-bold">${title}</h1>${sub?`<p class="text-sm text-slate-400 mt-0.5">${sub}</p>`:''}</div>
     <div class="flex gap-2 shrink-0">${actionsHtml}</div></div>`;
 }
-const btnPrimary = (label,onclick) => `<button onclick="${onclick}" class="bg-gradient-to-r from-violet-600 to-purple-700 hover:from-violet-500 hover:to-purple-600 text-white text-sm font-semibold px-4 py-2.5 rounded-xl shadow-lg shadow-violet-600/25 transition-transform hover:scale-[1.02]">${label}</button>`;
+const btnPrimary = (label,onclick) => `<button onclick="${onclick}" class="bg-gradient-to-r from-blue-600 to-indigo-700 hover:from-blue-500 hover:to-indigo-600 text-white text-sm font-semibold px-4 py-2.5 rounded-xl shadow-lg shadow-blue-600/25 transition-transform hover:scale-[1.02]">${label}</button>`;
 const btnGhost = (label,onclick) => `<button onclick="${onclick}" class="bg-white border border-slate-200 hover:bg-slate-50 text-sm font-medium px-4 py-2.5 rounded-xl">${label}</button>`;
 const empty = (icon,msg) => `<div class="text-center py-16 text-slate-400"><div class="text-5xl mb-3">${icon}</div><p>${msg}</p></div>`;
 
