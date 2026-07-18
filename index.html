@@ -82,7 +82,9 @@ const fmtNum = n => new Intl.NumberFormat('es-CO').format(+n||0);
 const fmtDate = iso => { if(!iso) return '—'; const [y,m,d]=iso.split('-'); return `${d}/${m}/${y}`; };
 const fmtConsec = n => String(n||0).padStart(3,'0');
 const daysUntil = iso => { if(!iso) return null; const d=Math.round((new Date(iso)-new Date(todayISO()))/86400000); return d; };
-const esc = s => String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const esc = s => String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+// Solo deja pasar imágenes en formato data:image/... (bloquea valores que rompan el atributo src)
+const fotoSrc = f => (typeof f==='string' && /^data:image\/(png|jpe?g|webp|gif);base64,[A-Za-z0-9+/=]+$/.test(f)) ? f : '';
 
 /* ---------- Catálogo de medicamentos (para cargar inventario rápido) ---------- */
 const CATALOGO = `
@@ -676,7 +678,7 @@ function catPick(i){
 function catBlur(){ setTimeout(()=>{ const d=document.getElementById('catDrop'); if(d) d.classList.add('hidden'); }, 150); }
 function fotoAreaInner(){
   return fotoTmp
-    ? `<div class="relative w-24 h-24"><img src="${fotoTmp}" class="w-24 h-24 object-cover rounded-xl border border-slate-200"><button type="button" onclick="quitarFoto()" class="absolute -top-2 -right-2 bg-rose-500 text-white w-6 h-6 rounded-full text-sm leading-none">×</button></div>`
+    ? `<div class="relative w-24 h-24"><img src="${fotoSrc(fotoTmp)}" class="w-24 h-24 object-cover rounded-xl border border-slate-200"><button type="button" onclick="quitarFoto()" class="absolute -top-2 -right-2 bg-rose-500 text-white w-6 h-6 rounded-full text-sm leading-none">×</button></div>`
     : `<label class="w-24 h-24 border-2 border-dashed border-slate-200 rounded-xl grid place-items-center cursor-pointer text-slate-400 hover:border-brand hover:text-brand text-center text-xs leading-tight"><input type="file" accept="image/*" class="hidden" onchange="onFoto(this)">📷<br>Foto</label>`;
 }
 
@@ -772,7 +774,7 @@ function viewInventario(){
     mostrados++;
     const st = filtroActivo ? lotes.reduce((s,l)=>s+l.cantidad,0) : stockDe(p);
     const nombreCell = `<div class="flex items-center gap-3">
-        ${p.foto?`<img src="${p.foto}" class="w-10 h-10 rounded-lg object-cover border border-slate-100 shrink-0">`:`<div class="w-10 h-10 rounded-lg bg-slate-100 grid place-items-center text-slate-300 shrink-0">📦</div>`}
+        ${fotoSrc(p.foto)?`<img src="${fotoSrc(p.foto)}" class="w-10 h-10 rounded-lg object-cover border border-slate-100 shrink-0">`:`<div class="w-10 h-10 rounded-lg bg-slate-100 grid place-items-center text-slate-300 shrink-0">📦</div>`}
         <div class="min-w-0"><div class="font-medium truncate">${esc(p.nombre)}</div><div class="text-xs text-slate-400 truncate">${esc(p.categoria||'Sin categoría')}${p.codigo?` · ${esc(p.codigo)}`:''}${lotes.length>1?` · ${lotes.length} lotes`:''}</div></div>
       </div>`;
     if(lotes.length<=1){
@@ -1121,7 +1123,7 @@ function ventaBody(){
     </div>
     ${carritoV.length? `<div class="space-y-2 mb-3">${carritoV.map((i,idx)=>{const p=getProducto(i.prodId); const especial=p&&i.precio!==p.precioVenta; return `
       <div class="flex items-center gap-2 bg-slate-50 rounded-xl p-2.5">
-        ${p.foto?`<img src="${p.foto}" class="w-9 h-9 rounded-lg object-cover shrink-0">`:''}
+        ${fotoSrc(p.foto)?`<img src="${fotoSrc(p.foto)}" class="w-9 h-9 rounded-lg object-cover shrink-0">`:''}
         <div class="flex-1 min-w-0"><div class="text-sm font-medium truncate">${esc(p.nombre)}</div><div class="text-xs text-slate-400">${i.cant} × ${fmtMoney(i.precio)} ${especial?'<span class="text-amber-600 font-medium">· precio especial</span>':''}</div></div>
         <div class="text-sm font-semibold">${fmtMoney(i.cant*i.precio)}</div>
         <button type="button" onclick="rmCarrito(${idx})" class="text-rose-400 text-lg px-1">×</button>
