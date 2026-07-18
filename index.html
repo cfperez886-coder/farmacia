@@ -697,6 +697,7 @@ function viewClientes(){
           </div>
           <div class="flex flex-col gap-1 shrink-0">
             <button onclick="openCliente('${c.id}')" class="text-xs text-brand-700 font-medium px-2 py-1 hover:bg-brand-50 rounded-lg">Editar</button>
+            ${(c.movs&&c.movs.length)?`<button onclick="openEstadoCuenta('${c.id}')" class="text-xs text-brand-700 font-medium px-2 py-1 hover:bg-brand-50 rounded-lg">Estado cuenta 📄</button>`:''}
             ${c.saldo>0?`<button onclick="abonar('${c.id}')" class="text-xs text-teal-700 font-medium px-2 py-1 hover:bg-teal-50 rounded-lg">Abonar</button>
             <button onclick="cobrarWA('${c.id}')" class="text-xs text-emerald-700 font-medium px-2 py-1 hover:bg-emerald-50 rounded-lg">Cobrar 📲</button>`:''}
           </div>
@@ -709,17 +710,43 @@ function viewInventario(){
   const filas = ps.map(p=>{
     const st = stockDe(p);
     const bajo = st<=DB.config.alertaStock;
-    const prox = (p.lotes||[]).map(l=>l.venc).filter(Boolean).sort()[0];
-    return `<tr data-search="${sdata(p.nombre+' '+(p.categoria||'')+' '+(p.codigo||''))}" class="border-t border-slate-100 hover:bg-slate-50">
-      <td class="p-3"><div class="flex items-center gap-3">
+    const search = sdata(p.nombre+' '+(p.categoria||'')+' '+(p.codigo||''));
+    const lotes = (p.lotes||[]).filter(l=>l.cantidad>0).slice().sort((a,b)=>{
+      const av=a.venc||'9999-99-99', bv=b.venc||'9999-99-99'; return av<bv?-1:av>bv?1:0;
+    });
+    const nombreCell = `<div class="flex items-center gap-3">
         ${p.foto?`<img src="${p.foto}" class="w-10 h-10 rounded-lg object-cover border border-slate-100 shrink-0">`:`<div class="w-10 h-10 rounded-lg bg-slate-100 grid place-items-center text-slate-300 shrink-0">📦</div>`}
-        <div class="min-w-0"><div class="font-medium truncate">${esc(p.nombre)}</div><div class="text-xs text-slate-400 truncate">${esc(p.categoria||'Sin categoría')}${p.codigo?` · ${esc(p.codigo)}`:''}</div></div>
-      </div></td>
-      <td class="p-3 text-right whitespace-nowrap">${fmtMoney(p.precioVenta)}</td>
-      <td class="p-3 text-center"><span class="font-semibold ${bajo?(st===0?'text-rose-600':'text-amber-600'):''}">${st}</span> <span class="text-xs text-slate-400">${esc(p.unidad||'u')}</span></td>
-      <td class="p-3 text-center text-xs ${prox&&daysUntil(prox)<=DB.config.alertaVencimiento?'text-amber-600 font-medium':'text-slate-400'}">${prox?fmtDate(prox):'—'}</td>
-      <td class="p-3 text-right"><button onclick="openProducto('${p.id}')" class="text-xs text-brand-700 font-medium">Editar</button></td>
-    </tr>`;
+        <div class="min-w-0"><div class="font-medium truncate">${esc(p.nombre)}</div><div class="text-xs text-slate-400 truncate">${esc(p.categoria||'Sin categoría')}${p.codigo?` · ${esc(p.codigo)}`:''}${lotes.length>1?` · ${lotes.length} lotes`:''}</div></div>
+      </div>`;
+    if(lotes.length<=1){
+      const prox = lotes[0]?.venc;
+      return `<tr data-search="${search}" class="border-t border-slate-100 hover:bg-slate-50">
+        <td class="p-3">${nombreCell}</td>
+        <td class="p-3 text-right whitespace-nowrap">${fmtMoney(p.precioVenta)}</td>
+        <td class="p-3 text-center"><span class="font-semibold ${bajo?(st===0?'text-rose-600':'text-amber-600'):''}">${st}</span> <span class="text-xs text-slate-400">${esc(p.unidad||'u')}</span></td>
+        <td class="p-3 text-center text-xs ${prox&&daysUntil(prox)<=DB.config.alertaVencimiento?'text-amber-600 font-medium':'text-slate-400'}">${prox?fmtDate(prox):'—'}</td>
+        <td class="p-3 text-right"><button onclick="openProducto('${p.id}')" class="text-xs text-brand-700 font-medium">Editar</button></td>
+      </tr>`;
+    }
+    const header = `<tr data-search="${search}" class="border-t border-slate-100 hover:bg-slate-50 bg-slate-50/60">
+        <td class="p-3">${nombreCell}</td>
+        <td class="p-3 text-right whitespace-nowrap">${fmtMoney(p.precioVenta)}</td>
+        <td class="p-3 text-center"><span class="font-semibold ${bajo?(st===0?'text-rose-600':'text-amber-600'):''}">${st}</span> <span class="text-xs text-slate-400">${esc(p.unidad||'u')} total</span></td>
+        <td class="p-3 text-center text-xs text-slate-400">—</td>
+        <td class="p-3 text-right"><button onclick="openProducto('${p.id}')" class="text-xs text-brand-700 font-medium">Editar</button></td>
+      </tr>`;
+    const subFilas = lotes.map(l=>{
+      const d = daysUntil(l.venc);
+      const urgente = l.venc && d!==null && d<=DB.config.alertaVencimiento;
+      return `<tr data-search="${search}" class="border-t border-slate-50">
+        <td class="p-2 pl-14 text-xs text-slate-400">↳ Lote</td>
+        <td></td>
+        <td class="p-2 text-center text-xs ${urgente?'text-amber-600 font-medium':'text-slate-500'}">${l.cantidad} ${esc(p.unidad||'u')}</td>
+        <td class="p-2 text-center text-xs ${d!==null&&d<0?'text-rose-600 font-medium':urgente?'text-amber-600 font-medium':'text-slate-400'}">${l.venc?fmtDate(l.venc):'sin fecha'}</td>
+        <td></td>
+      </tr>`;
+    }).join('');
+    return header + subFilas;
   }).join('');
   return pageHead('Inventario', `${ps.length} producto(s) · Valor venta: ${fmtMoney(DB.productos.reduce((s,p)=>s+stockDe(p)*p.precioVenta,0))}`, btnGhost('📦 Reposición','openReposicion()') + btnPrimary('+ Producto','openProducto()'))
     + (ps.length? searchBar('listInventario','Buscar por nombre, categoría o código…') + `<div class="card overflow-x-auto"><table class="w-full text-sm">
@@ -870,14 +897,18 @@ function openCliente(id){
       ${id && (c.movs||[]).length ? `<div class="bg-slate-50 rounded-xl p-3 mb-1">
         <div class="text-xs font-medium text-slate-500 mb-2">Historial de deuda${c.saldo>0?` · debe <b class="text-amber-700">${fmtMoney(c.saldo)}</b>`:''}</div>
         <div class="space-y-1 max-h-32 overflow-y-auto">${c.movs.slice(-12).reverse().map(m=>`
-          <div class="flex justify-between text-xs">
-            <span class="text-slate-400">${fmtDate(m.fecha)} · ${m.tipo==='abono'?'Abonó':m.tipo==='fiado'?'Compró fiado':'Venta anulada'}</span>
-            <span class="font-medium ${m.tipo==='fiado'?'text-amber-700':'text-teal-600'}">${m.tipo==='fiado'?'+':'−'}${fmtMoney(m.monto)}</span>
+          <div class="text-xs">
+            <div class="flex justify-between">
+              <span class="text-slate-400">${fmtDate(m.fecha)} · ${m.tipo==='abono'?'Abonó':m.tipo==='fiado'?'Compró fiado':'Venta anulada'}</span>
+              <span class="font-medium ${m.tipo==='fiado'?'text-amber-700':'text-teal-600'}">${m.tipo==='fiado'?'+':'−'}${fmtMoney(m.monto)}</span>
+            </div>
+            ${m.tipo==='fiado'&&(m.items||[]).length?`<div class="text-slate-400 truncate">${m.items.map(i=>esc(i.nombre)+' ×'+i.cant).join(', ')}</div>`:''}
           </div>`).join('')}</div>
-        ${c.saldo>0?`<div class="flex gap-2 mt-2">
-          <button type="button" onclick="abonar('${id}')" class="flex-1 text-xs text-teal-700 font-medium border border-teal-200 rounded-lg py-1.5 hover:bg-teal-50">Registrar abono</button>
-          <button type="button" onclick="cobrarWA('${id}')" class="flex-1 text-xs text-emerald-700 font-medium border border-emerald-200 rounded-lg py-1.5 hover:bg-emerald-50">Recordar cobro 📲</button>
-        </div>`:''}
+        <div class="flex gap-2 mt-2">
+          ${c.saldo>0?`<button type="button" onclick="abonar('${id}')" class="flex-1 text-xs text-teal-700 font-medium border border-teal-200 rounded-lg py-1.5 hover:bg-teal-50">Registrar abono</button>
+          <button type="button" onclick="cobrarWA('${id}')" class="flex-1 text-xs text-emerald-700 font-medium border border-emerald-200 rounded-lg py-1.5 hover:bg-emerald-50">Recordar cobro 📲</button>`:''}
+        </div>
+        <button type="button" onclick="openEstadoCuenta('${id}')" class="w-full mt-2 text-xs text-brand-700 font-medium border border-brand-100 rounded-lg py-1.5 hover:bg-brand-50">📄 Ver estado de cuenta completo</button>
       </div>`:''}
       <div class="flex gap-2 mt-4">
         <button type="submit" class="flex-1 bg-brand hover:bg-brand-700 text-white font-semibold py-2.5 rounded-xl">Guardar</button>
@@ -898,6 +929,43 @@ function cobrarWA(id){
   if(tel.length===10 && tel.startsWith('3')) tel='57'+tel; // celular colombiano
   const txt=`Hola ${c.nombre} 👋, te saludamos de *${DB.config.negocio}*. Te recordamos que tienes un saldo pendiente de *${fmtMoney(c.saldo)}*. Cuando puedas pasar a ponerte al día, con gusto te atendemos. ¡Gracias! 🙏`;
   window.open('https://wa.me/'+(tel||'')+'?text='+encodeURIComponent(txt),'_blank');
+}
+function estadoCuentaTexto(c){
+  const movs=(c.movs||[]).slice().sort((a,b)=> a.fecha<b.fecha?-1: a.fecha>b.fecha?1: 0);
+  const lineas=movs.map(m=>{
+    if(m.tipo==='fiado'){
+      const prods=(m.items||[]).map(i=>`${i.nombre} x${i.cant}`).join(', ');
+      return `• ${fmtDate(m.fecha)} — Fiado${prods?`: ${prods}`:''} — ${fmtMoney(m.monto)}`;
+    }
+    if(m.tipo==='abono') return `• ${fmtDate(m.fecha)} — Abono recibido — −${fmtMoney(m.monto)}`;
+    return `• ${fmtDate(m.fecha)} — Venta anulada — −${fmtMoney(m.monto)}`;
+  });
+  return `📄 *Estado de cuenta*\n*${DB.config.negocio}*\n\nCliente: *${c.nombre}*\n\n${lineas.join('\n')}\n\n*Saldo actual: ${fmtMoney(c.saldo)}*`;
+}
+function waEstadoCuenta(id){
+  const c=getCliente(id); if(!c) return;
+  let tel=(c.telefono||'').replace(/\D/g,'');
+  if(tel.length===10 && tel.startsWith('3')) tel='57'+tel;
+  window.open('https://wa.me/'+(tel||'')+'?text='+encodeURIComponent(estadoCuentaTexto(c)),'_blank');
+}
+function openEstadoCuenta(id){
+  const c=getCliente(id); if(!c) return;
+  const movs=(c.movs||[]).slice().sort((a,b)=> a.fecha<b.fecha?-1: a.fecha>b.fecha?1: 0);
+  openModal(`📄 Estado de cuenta`,
+    `<div class="mb-1"><div class="font-semibold">${esc(c.nombre)}</div><div class="text-xs text-slate-400">${esc(c.telefono||'')}</div></div>
+     ${movs.length? `<div class="space-y-2 my-4 max-h-80 overflow-y-auto">${movs.map(m=>{
+        if(m.tipo==='fiado'){
+          const prods=(m.items||[]).map(i=>esc(i.nombre)+' ×'+i.cant).join(', ');
+          return `<div class="border-b border-slate-100 pb-2">
+            <div class="flex justify-between text-sm"><span class="font-medium">${fmtDate(m.fecha)} · Fiado</span><span class="font-semibold text-amber-600">+${fmtMoney(m.monto)}</span></div>
+            ${prods?`<div class="text-xs text-slate-400 mt-0.5">${prods}</div>`:''}
+          </div>`;
+        }
+        const label = m.tipo==='abono' ? 'Abono recibido' : 'Venta anulada';
+        return `<div class="flex justify-between text-sm border-b border-slate-100 pb-2"><span>${fmtDate(m.fecha)} · ${label}</span><span class="font-semibold text-teal-600">−${fmtMoney(m.monto)}</span></div>`;
+      }).join('')}</div>` : `<p class="text-sm text-slate-400 text-center py-6">Sin movimientos registrados.</p>`}
+     <div class="flex justify-between items-center text-lg font-bold border-t border-slate-100 pt-3 mb-4"><span>Saldo actual</span><span class="${c.saldo>0?'text-amber-600':'text-teal-600'}">${fmtMoney(c.saldo)}</span></div>
+     <button onclick="waEstadoCuenta('${id}')" class="w-full bg-teal-600 hover:bg-teal-700 text-white font-semibold py-2.5 rounded-xl">📲 Enviar estado de cuenta por WhatsApp</button>`, 'lg');
 }
 function abonar(id){
   const c=getCliente(id);
@@ -985,15 +1053,18 @@ function ventaBody(){
       </div></div>`;
   }
   return `
-    <div class="flex gap-2 mb-3">
-      <select id="vProd" class="${inputCls} flex-1"><option value="">Agregar producto…</option>${opts}</select>
-      <input id="vCant" type="number" min="1" value="1" class="${inputCls} w-20">
-      <button type="button" onclick="addCarrito()" class="bg-brand text-white px-4 rounded-xl font-semibold">+</button>
+    <div class="flex gap-2 mb-1">
+      <select id="vProd" onchange="onProdVentaChange()" class="${inputCls} flex-1"><option value="">Agregar producto…</option>${opts}</select>
+      <input id="vCant" type="number" min="1" value="1" class="${inputCls} w-16" title="Cantidad">
     </div>
-    ${carritoV.length? `<div class="space-y-2 mb-3">${carritoV.map((i,idx)=>{const p=getProducto(i.prodId);return `
+    <div class="flex gap-2 mb-3">
+      <input id="vPrecio" type="number" min="0" step="any" placeholder="Precio de venta" class="${inputCls} flex-1" title="Precio (editable para ofrecer una tarifa especial o descuento)">
+      <button type="button" onclick="addCarrito()" class="bg-brand text-white px-4 rounded-xl font-semibold shrink-0">+ Agregar</button>
+    </div>
+    ${carritoV.length? `<div class="space-y-2 mb-3">${carritoV.map((i,idx)=>{const p=getProducto(i.prodId); const especial=p&&i.precio!==p.precioVenta; return `
       <div class="flex items-center gap-2 bg-slate-50 rounded-xl p-2.5">
         ${p.foto?`<img src="${p.foto}" class="w-9 h-9 rounded-lg object-cover shrink-0">`:''}
-        <div class="flex-1 min-w-0"><div class="text-sm font-medium truncate">${esc(p.nombre)}</div><div class="text-xs text-slate-400">${i.cant} × ${fmtMoney(i.precio)}</div></div>
+        <div class="flex-1 min-w-0"><div class="text-sm font-medium truncate">${esc(p.nombre)}</div><div class="text-xs text-slate-400">${i.cant} × ${fmtMoney(i.precio)} ${especial?'<span class="text-amber-600 font-medium">· precio especial</span>':''}</div></div>
         <div class="text-sm font-semibold">${fmtMoney(i.cant*i.precio)}</div>
         <button type="button" onclick="rmCarrito(${idx})" class="text-rose-400 text-lg px-1">×</button>
       </div>`;}).join('')}</div>` : `<p class="text-sm text-slate-400 text-center py-4">Agrega productos a la venta.</p>`}
@@ -1004,12 +1075,20 @@ function ventaBody(){
     <button type="button" onclick="confirmVenta()" ${carritoV.length?'':'disabled'} class="w-full bg-teal-600 disabled:opacity-40 hover:bg-teal-700 text-white font-semibold py-3 rounded-xl">Registrar venta · ${fmtMoney(total)}</button>`;
 }
 function refreshVenta(){ const b=$('#modal .p-5'); if(b) b.innerHTML=ventaBody(); }
+function onProdVentaChange(){
+  const id=$('#vProd').value; const p=getProducto(id);
+  $('#vPrecio').value = p ? p.precioVenta : '';
+}
 function addCarrito(){
   const id=$('#vProd').value; const cant=+$('#vCant').value||0;
   if(!id) return; if(cant<=0) return toast('Cantidad inválida','err');
   const p=getProducto(id); const yaEnCarrito=carritoV.filter(i=>i.prodId===id).reduce((s,i)=>s+i.cant,0);
   if(cant+yaEnCarrito>stockDe(p)) return toast(`Solo hay ${stockDe(p)} en stock`,'err');
-  const ex=carritoV.find(i=>i.prodId===id); if(ex) ex.cant+=cant; else carritoV.push({prodId:id,cant,precio:p.precioVenta,costo:p.precioCompra||0});
+  const precioTxt=$('#vPrecio').value;
+  const precio = precioTxt!=='' ? +precioTxt : p.precioVenta;
+  if(isNaN(precio)||precio<0) return toast('Precio inválido','err');
+  const ex=carritoV.find(i=>i.prodId===id && i.precio===precio);
+  if(ex) ex.cant+=cant; else carritoV.push({prodId:id,cant,precio,costo:p.precioCompra||0});
   refreshVenta();
 }
 function rmCarrito(idx){ carritoV.splice(idx,1); refreshVenta(); }
@@ -1024,7 +1103,11 @@ function confirmVenta(){
   const metodo = fiado ? 'Fiado' : (($('#vMetodo')&&$('#vMetodo').value)||'Efectivo');
   const venta={ id:uid(), fecha:todayISO(), creado:Date.now(), items:carritoV.map(i=>({prodId:i.prodId,cant:i.cant,precio:i.precio,costo:i.costo})), total, ganancia, fiado, metodo, clienteId:clienteId||null };
   DB.ventas.push(venta);
-  if(fiado && clienteId){ const c=getCliente(clienteId); c.saldo=(c.saldo||0)+total; c.movs=c.movs||[]; c.movs.push({fecha:todayISO(),tipo:'fiado',monto:total}); }
+  if(fiado && clienteId){
+    const c=getCliente(clienteId); c.saldo=(c.saldo||0)+total; c.movs=c.movs||[];
+    const items = carritoV.map(i=>({nombre:getProducto(i.prodId)?.nombre||'(producto)', cant:i.cant}));
+    c.movs.push({fecha:todayISO(),tipo:'fiado',monto:total,ventaId:venta.id,items});
+  }
   store.save(); closeModal(); render(); toast('Venta registrada ✔');
   verVenta(venta.id); // muestra el recibo con opciones de WhatsApp/imprimir
 }
