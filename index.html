@@ -203,19 +203,22 @@ ZALDIAR CJ X 20 TAB
 const store = {
   key:'miNegocio_v1',
   data:null,
+  // Normaliza cualquier juego de datos (local o traído de la nube): campos nuevos,
+  // arrays garantizados y consecutivo de venta sin huecos ni duplicados.
+  migrar(d){
+    d.config = Object.assign({ negocio:'Mi Negocio', alertaVencimiento:30, alertaStock:5, nextConsecutivo:1 }, d.config||{});
+    ['clientes','productos','compras','ventas','gastos'].forEach(k=>{ if(!Array.isArray(d[k])) d[k]=[]; });
+    const yaAsignados = d.ventas.map(v=>v.consecutivo).filter(Boolean);
+    const maxAsignado = yaAsignados.length ? Math.max(...yaAsignados) : 0;
+    if(!(d.config.nextConsecutivo > maxAsignado)) d.config.nextConsecutivo = maxAsignado+1; // cubre undefined/NaN
+    const sinConsec = d.ventas.filter(v=>!v.consecutivo).sort((a,b)=>(a.creado||0)-(b.creado||0));
+    sinConsec.forEach(v=>{ v.consecutivo = d.config.nextConsecutivo++; });
+    return d;
+  },
   load(){
     try{ this.data = JSON.parse(localStorage.getItem(this.key)) }catch(e){ this.data=null }
     if(!this.data) this.data = { clientes:[], productos:[], compras:[], ventas:[], gastos:[], config:{ negocio:'Mi Negocio', alertaVencimiento:30, alertaStock:5, nextConsecutivo:1 } };
-    // asegurar campos nuevos
-    this.data.config = Object.assign({ negocio:'Mi Negocio', alertaVencimiento:30, alertaStock:5, nextConsecutivo:1 }, this.data.config||{});
-    if(!Array.isArray(this.data.gastos)) this.data.gastos=[];
-    // consecutivo de venta: asignar a ventas existentes que aún no lo tengan, en orden de creación
-    const yaAsignados = this.data.ventas.map(v=>v.consecutivo).filter(Boolean);
-    const maxAsignado = yaAsignados.length ? Math.max(...yaAsignados) : 0;
-    if(this.data.config.nextConsecutivo <= maxAsignado) this.data.config.nextConsecutivo = maxAsignado+1;
-    const sinConsec = this.data.ventas.filter(v=>!v.consecutivo).sort((a,b)=>(a.creado||0)-(b.creado||0));
-    sinConsec.forEach(v=>{ v.consecutivo = this.data.config.nextConsecutivo++; });
-    return this.data;
+    return this.migrar(this.data);
   },
   save(){ localStorage.setItem(this.key, JSON.stringify(this.data)); if(cloud.ready && cloud.user && !cloud.applying) cloud.push(); },
 };
@@ -283,8 +286,7 @@ const cloud = {
     this.applying = true;
     Object.keys(DB).forEach(k=>delete DB[k]);
     Object.assign(DB, cd);
-    if(!DB.config) DB.config = { negocio:'Mi Negocio', alertaVencimiento:30, alertaStock:5 };
-    ['clientes','productos','compras','ventas','gastos'].forEach(k=>{ if(!Array.isArray(DB[k])) DB[k]=[]; });
+    store.migrar(DB); // los datos de la nube pueden venir de una versión anterior de la app
     store.data = DB; store.save();
     this.applying = false;
     render();
@@ -564,6 +566,9 @@ function renderView(){
   const v = $('#view');
   const views = { dashboard:viewDashboard, ventas:viewVentas, compras:viewCompras, inventario:viewInventario, clientes:viewClientes, vencimientos:viewVencimientos, reportes:viewReportes, gastos:viewGastos };
   v.innerHTML = (views[route]||viewDashboard)();
+  // Re-aplicar filtros activos (búsqueda + fechas) tras cada re-render,
+  // para que la lista siempre coincida con lo que muestran las cajas de filtro.
+  Object.keys(listFilters).forEach(id=>{ if(document.getElementById(id)) applyListFilter(id); });
 }
 
 function pageHead(title, sub, actionsHtml=''){
@@ -577,9 +582,10 @@ const empty = (icon,msg) => `<div class="text-center py-16 text-slate-400"><div 
 
 /* ---------- Búsqueda (filtra sin re-renderizar, conserva el foco) ---------- */
 function searchBar(id, placeholder){
+  const st = listFilters[id];
   return `<div class="mb-4 relative">
     <span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm pointer-events-none">🔍</span>
-    <input type="search" oninput="filterList(this,'${id}')" placeholder="${placeholder}" class="w-full border border-slate-200 rounded-xl pl-9 pr-3 py-2.5 text-sm focus:border-brand focus:ring-2 focus:ring-brand-100">
+    <input type="search" data-filter-for="${id}" value="${esc(st?.qRaw||'')}" oninput="filterList(this,'${id}')" placeholder="${placeholder}" class="w-full border border-slate-200 rounded-xl pl-9 pr-3 py-2.5 text-sm focus:border-brand focus:ring-2 focus:ring-brand-100">
   </div>`;
 }
 const noRes = id => `<div id="${id}-empty" style="display:none" class="text-center text-slate-400 py-10 text-sm">Sin resultados para tu búsqueda 🔍</div>`;
@@ -604,6 +610,7 @@ function applyListFilter(id){
 }
 function filterList(inp, id){
   listFilters[id] = listFilters[id] || {q:'',desde:'',hasta:''};
+  listFilters[id].qRaw = inp.value;
   listFilters[id].q = inp.value.trim().toLowerCase();
   applyListFilter(id);
 }
@@ -1428,6 +1435,11 @@ function delCompra(id){
 }
 
 /* ---------- EXCEL: plantilla de cargue masivo, importación y reportes KPI ---------- */
+function excelDisponible(){
+  if(window.XLSX) return true;
+  toast('La función de Excel no está disponible: abre la app con internet una vez para cargarla','err');
+  return false;
+}
 function excelFechaISO(val){
   if(val===undefined||val===null||val==='') return '';
   if(val instanceof Date) return isoLocal(val);
@@ -1442,6 +1454,7 @@ function excelFechaISO(val){
   return '';
 }
 function descargarPlantillaInventario(){
+  if(!excelDisponible()) return;
   const headers = ['nombre','categoria','codigo','unidad','precioCompra','precioVenta','stockInicial','lote','vencimiento'];
   const ejemplo = ['ACETAMINOFEN 500 MG CJ X 20 TAB','Medicamento','7701234567890','u',1200,2000,50,'L2026A','2026-12-31'];
   const ws = XLSX.utils.aoa_to_sheet([headers, ejemplo]);
@@ -1474,6 +1487,7 @@ function openCargueMasivo(){
      <button onclick="procesarCargueMasivo()" class="w-full bg-brand hover:bg-brand-700 text-white font-semibold py-2.5 rounded-xl">Procesar archivo</button>`);
 }
 function procesarCargueMasivo(){
+  if(!excelDisponible()) return;
   const inp = document.getElementById('cargueFile'); const msg = document.getElementById('cargueMsg');
   const f = inp && inp.files && inp.files[0];
   if(!f){ if(msg){ msg.style.color='#e11d48'; msg.textContent='Elige un archivo primero.'; } return; }
@@ -1513,13 +1527,16 @@ function procesarCargueMasivo(){
         }
       });
       store.save(); render();
-      if(msg){ msg.style.color='#0d9488'; msg.textContent=`Listo: ${creados} producto(s) creado(s), ${actualizados} actualizado(s), ${lotesAgregados} lote(s) agregado(s)${saltados?`, ${saltados} fila(s) sin nombre omitida(s)`:''}.`; }
+      // render() reconstruye el modal, así que hay que volver a buscar el elemento del mensaje
+      const msg2 = document.getElementById('cargueMsg');
+      if(msg2){ msg2.style.color='#0d9488'; msg2.textContent=`Listo: ${creados} producto(s) creado(s), ${actualizados} actualizado(s), ${lotesAgregados} lote(s) agregado(s)${saltados?`, ${saltados} fila(s) sin nombre omitida(s)`:''}.`; }
       toast('Cargue masivo completado ✔');
     }catch(err){ console.error(err); if(msg){ msg.style.color='#e11d48'; msg.textContent='No se pudo leer el archivo. Verifica que tenga el formato de la plantilla.'; } }
   };
   reader.readAsArrayBuffer(f);
 }
 function exportInventarioExcel(){
+  if(!excelDisponible()) return;
   const ps = DB.productos.slice().sort((a,b)=>a.nombre.localeCompare(b.nombre));
   const detalle = [];
   ps.forEach(p=>{
@@ -1557,6 +1574,7 @@ function exportInventarioExcel(){
   XLSX.writeFile(wb, `inventario-${todayISO()}.xlsx`);
 }
 function exportVentasExcel(){
+  if(!excelDisponible()) return;
   const st = listFilters['listVentas']||{desde:'',hasta:''};
   let vs = DB.ventas.slice();
   if(st.desde) vs = vs.filter(v=>v.fecha>=st.desde);
@@ -1593,6 +1611,7 @@ function exportVentasExcel(){
   XLSX.writeFile(wb, `ventas-${todayISO()}.xlsx`);
 }
 function exportClientesExcel(){
+  if(!excelDisponible()) return;
   const cs = DB.clientes.slice().sort((a,b)=>a.nombre.localeCompare(b.nombre));
   const detalle = cs.map(c=>{
     const movs=(c.movs||[]);
@@ -1658,7 +1677,7 @@ function exportData(){
 function importData(){
   const inp=document.createElement('input'); inp.type='file'; inp.accept='.json';
   inp.onchange=e=>{ const f=e.target.files[0]; if(!f)return; const r=new FileReader();
-    r.onload=()=>{ try{ const d=JSON.parse(r.result); Object.assign(DB,d); store.save(); closeModal(); render(); toast('Datos importados'); }catch{ toast('Archivo inválido','err'); } };
+    r.onload=()=>{ try{ const d=JSON.parse(r.result); Object.assign(DB,d); store.migrar(DB); store.save(); closeModal(); render(); toast('Datos importados'); }catch{ toast('Archivo inválido','err'); } };
     r.readAsText(f); };
   inp.click();
 }
