@@ -500,6 +500,29 @@ const NAV = [
   { id:'reportes', label:'Reportes', icon:'📊' },
 ];
 
+// Créditos con fecha límite a 5 días o menos (o ya vencida):
+// - 'cobrar': clientes con saldo pendiente por cobrar
+// - 'pagar': proveedores a los que les debo
+function creditosPorVencer(){
+  const items=[];
+  DB.clientes.forEach(c=>{
+    if(!(c.saldo>0)) return;
+    const vence=(c.movs||[]).filter(m=>m.tipo==='fiado'&&m.vence).map(m=>m.vence).sort()[0];
+    if(!vence) return;
+    const d=daysUntil(vence);
+    if(d!==null && d<=5) items.push({ tipo:'cobrar', id:c.id, nombre:c.nombre, negocio:c.negocio||'', monto:c.saldo, vence, d });
+  });
+  (DB.proveedores||[]).forEach(p=>{
+    if(!(p.saldo>0)) return;
+    const vence=(p.movs||[]).filter(m=>m.tipo==='credito'&&m.vence).map(m=>m.vence).sort()[0];
+    if(!vence) return;
+    const d=daysUntil(vence);
+    if(d!==null && d<=5) items.push({ tipo:'pagar', id:p.id, nombre:p.nombre, negocio:p.negocio||'', monto:p.saldo, vence, d });
+  });
+  items.sort((a,b)=>a.d-b.d);
+  return items;
+}
+
 // Solo lotes con existencias cuyo vencimiento cae dentro del rango de alerta (o ya vencidos)
 function alertsCount(){
   return DB.productos.reduce((s,p)=> s + (p.lotes||[]).filter(l=>{
@@ -700,8 +723,22 @@ function viewDashboard(){
 
   const kpi = (icon,label,val,sub,color)=>`<div class="card p-4 relative overflow-hidden"><span class="absolute -right-1 -top-1 text-4xl opacity-10 select-none">${icon}</span><div class="text-xs text-slate-400 font-medium">${label}</div><div class="text-2xl font-bold mt-1 ${color||''}">${val}</div>${sub?`<div class="text-xs text-slate-400 mt-0.5">${sub}</div>`:''}</div>`;
 
+  const creditos = creditosPorVencer();
+  const notifCreditos = creditos.length ? `
+      <div class="card p-4 mb-4 border-l-4 border-amber-400">
+        <h3 class="font-semibold mb-2">🔔 Créditos por vencer <span class="text-xs font-normal text-slate-400">(a 5 días o menos)</span></h3>
+        <ul class="space-y-2">${creditos.map(x=>`
+          <li class="flex items-center justify-between gap-2 text-sm">
+            <button onclick="${x.tipo==='cobrar'?`openEstadoCuenta('${x.id}')`:`openEstadoCuentaProv('${x.id}')`}" class="min-w-0 text-left flex-1 hover:underline">
+              <span class="font-medium">${x.tipo==='cobrar'?'💰 Cobrar a':'💸 Pagar a'} ${esc(x.nombre)}</span>${x.negocio?` <span class="text-slate-400">· ${esc(x.negocio)}</span>`:''}
+              <span class="text-slate-400">· ${fmtMoney(x.monto)}</span>
+            </button>
+            <span class="shrink-0 text-xs font-semibold ${x.d<0?'text-rose-600':'text-amber-600'}">${x.d<0?`Venció hace ${-x.d}d`:x.d===0?'Vence hoy':`En ${x.d} día(s)`} · ${fmtDate(x.vence)}</span>
+          </li>`).join('')}</ul>
+      </div>` : '';
   return pageHead(`Hola 👋`, new Date().toLocaleDateString('es-CO',{weekday:'long',day:'numeric',month:'long'}),
       btnGhost('🧾 Cierre','openCierre()') + btnPrimary('+ Nueva venta','openVenta()'))
+    + notifCreditos
     + `<div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
         ${kpi('💵','Ventas de hoy', fmtMoney(totalHoy), `${ventasHoy.length} venta(s)`,'text-teal-600')}
         ${kpi('📅','Ventas del mes', fmtMoney(totalMes), `Ganancia: ${fmtMoney(gananciaMes)}`)}
@@ -898,7 +935,7 @@ function viewReportes(){
 
   const gastosMes = (filtro? DB.gastos.filter(g=>enRango(g.fecha)) : DB.gastos.filter(g=>g.fecha.slice(0,7)===mes)).filter(g=>g.tipo==='gasto').reduce((s,g)=>s+g.monto,0);
   const subtitulo = filtro ? `Del ${repFiltro.desde?fmtDate(repFiltro.desde):'inicio'} al ${repFiltro.hasta?fmtDate(repFiltro.hasta):'hoy'} · ${ventasMes.length} venta(s)` : new Date().toLocaleDateString('es-CO',{month:'long',year:'numeric'})+` · ${ventasMes.length} venta(s)`;
-  return pageHead('Reportes', subtitulo, btnGhost('💸 Gastos','go(\'gastos\')') + btnGhost('🧾 Cierre','openCierre()'))
+  return pageHead('Reportes', subtitulo, btnGhost('💸 Gastos','go(\'gastos\')') + btnGhost('🧾 Cierre', filtro?`openCierre('${repFiltro.desde}','${repFiltro.hasta}')`:'openCierre()'))
     + `<div class="flex flex-wrap items-end gap-2 mb-4">
         <label class="text-xs text-slate-500">Desde<input type="date" value="${repFiltro.desde}" onchange="onRepFecha('desde',this.value)" class="${inputCls} mt-1"></label>
         <label class="text-xs text-slate-500">Hasta<input type="date" value="${repFiltro.hasta}" onchange="onRepFecha('hasta',this.value)" class="${inputCls} mt-1"></label>
@@ -1426,50 +1463,54 @@ function saveGasto(e){
 }
 function delGasto(id){ if(!confirm('¿Eliminar este movimiento?'))return; DB.gastos=DB.gastos.filter(g=>g.id!==id); store.save(); render(); toast('Movimiento eliminado'); }
 
-/* ----- Cierre de caja ----- */
-function cierreDatos(){
+/* ----- Cierre de caja (por defecto el día de hoy; acepta un rango de fechas) ----- */
+function cierreDatos(desde,hasta){
   const hoy=todayISO();
-  const vs=DB.ventas.filter(v=>v.fecha===hoy);
+  if(!desde&&!hasta){ desde=hoy; hasta=hoy; }         // sin rango: cierre del día
+  else { desde=desde||'0000-01-01'; hasta=hasta||hoy; } // rango a medias: desde el inicio o hasta hoy
+  const enRango=f=> f>=desde && f<=hasta;
+  const vs=DB.ventas.filter(v=>enRango(v.fecha));
   const total=vs.reduce((s,v)=>s+v.total,0);
   const fiado=vs.filter(v=>v.fiado).reduce((s,v)=>s+v.total,0);
   const ganancia=vs.reduce((s,v)=>s+(v.ganancia||0),0);
   const porMetodo={};
   vs.filter(v=>!v.fiado).forEach(v=>{ const m=v.metodo||'Efectivo'; porMetodo[m]=(porMetodo[m]||0)+v.total; });
-  const abonos=DB.clientes.reduce((s,c)=>s+(c.movs||[]).filter(m=>m.tipo==='abono'&&m.fecha===hoy).reduce((x,m)=>x+m.monto,0),0);
-  const compras=DB.compras.filter(c=>c.fecha===hoy).reduce((s,c)=>s+c.total,0);
-  const gastosHoy=DB.gastos.filter(g=>g.fecha===hoy&&g.tipo==='gasto').reduce((s,g)=>s+g.monto,0);
-  const ingresosHoy=DB.gastos.filter(g=>g.fecha===hoy&&g.tipo==='ingreso').reduce((s,g)=>s+g.monto,0);
-  return { hoy, n:vs.length, total, fiado, contado:total-fiado, porMetodo, ganancia, abonos, compras, gastosHoy, ingresosHoy, caja:(total-fiado)+abonos+ingresosHoy-gastosHoy };
+  const abonos=DB.clientes.reduce((s,c)=>s+(c.movs||[]).filter(m=>m.tipo==='abono'&&enRango(m.fecha)).reduce((x,m)=>x+m.monto,0),0);
+  const compras=DB.compras.filter(c=>enRango(c.fecha)).reduce((s,c)=>s+c.total,0);
+  const gastosHoy=DB.gastos.filter(g=>enRango(g.fecha)&&g.tipo==='gasto').reduce((s,g)=>s+g.monto,0);
+  const ingresosHoy=DB.gastos.filter(g=>enRango(g.fecha)&&g.tipo==='ingreso').reduce((s,g)=>s+g.monto,0);
+  const rango = desde===hasta ? fmtDate(desde) : desde==='0000-01-01' ? `hasta el ${fmtDate(hasta)}` : `${fmtDate(desde)} al ${fmtDate(hasta)}`;
+  return { hoy, desde, hasta, rango, esHoy:desde===hoy&&hasta===hoy, n:vs.length, total, fiado, contado:total-fiado, porMetodo, ganancia, abonos, compras, gastosHoy, ingresosHoy, caja:(total-fiado)+abonos+ingresosHoy-gastosHoy };
 }
-function cierreTexto(){
-  const d=cierreDatos();
+function cierreTexto(desde,hasta){
+  const d=cierreDatos(desde,hasta);
   const metodos=Object.entries(d.porMetodo).map(([m,v])=>`   - ${m}: ${fmtMoney(v)}`).join('\n');
-  return `🧾 *${DB.config.negocio}* — Cierre de caja ${fmtDate(d.hoy)}\n\nVentas: ${d.n} por ${fmtMoney(d.total)}\n• De contado: ${fmtMoney(d.contado)}${metodos?`\n${metodos}`:''}\n• Crédito: ${fmtMoney(d.fiado)}\nAbonos recibidos: ${fmtMoney(d.abonos)}${d.ingresosHoy?`\nIngresos extra: ${fmtMoney(d.ingresosHoy)}`:''}\nGastos del día: ${fmtMoney(d.gastosHoy)}\n\n💵 Caja del día: ${fmtMoney(d.caja)}\n📈 Ganancia estimada: ${fmtMoney(d.ganancia)}\n🛒 Compras del día: ${fmtMoney(d.compras)}`;
+  return `🧾 *${DB.config.negocio}* — Cierre de caja ${d.rango}\n\nVentas: ${d.n} por ${fmtMoney(d.total)}\n• De contado: ${fmtMoney(d.contado)}${metodos?`\n${metodos}`:''}\n• Crédito: ${fmtMoney(d.fiado)}\nAbonos recibidos: ${fmtMoney(d.abonos)}${d.ingresosHoy?`\nIngresos extra: ${fmtMoney(d.ingresosHoy)}`:''}\nGastos: ${fmtMoney(d.gastosHoy)}\n\n💵 Caja del periodo: ${fmtMoney(d.caja)}\n📈 Ganancia estimada: ${fmtMoney(d.ganancia)}\n🛒 Compras: ${fmtMoney(d.compras)}`;
 }
-function openCierre(){
-  const d=cierreDatos();
+function openCierre(desde,hasta){
+  const d=cierreDatos(desde,hasta);
   const fila=(l,v,c)=>`<div class="flex justify-between text-sm py-2 border-b border-slate-50"><span class="text-slate-500">${l}</span><span class="font-semibold ${c||''}">${v}</span></div>`;
   const metodosHtml=Object.entries(d.porMetodo).map(([m,v])=>`<div class="flex justify-between text-xs py-1 pl-4 text-slate-400"><span>${esc(m)}</span><span>${fmtMoney(v)}</span></div>`).join('');
-  openModal('🧾 Cierre de caja — hoy',
-    fila('Ventas del día',`${d.n} venta(s) · ${fmtMoney(d.total)}`)
+  openModal(`🧾 Cierre de caja — ${d.esHoy?'hoy':d.rango}`,
+    fila(d.esHoy?'Ventas del día':'Ventas del periodo',`${d.n} venta(s) · ${fmtMoney(d.total)}`)
     +fila('De contado',fmtMoney(d.contado))
     +metodosHtml
     +fila('Crédito',fmtMoney(d.fiado),'text-amber-600')
     +fila('Abonos recibidos',fmtMoney(d.abonos),'text-teal-600')
     +(d.ingresosHoy?fila('Ingresos extra',fmtMoney(d.ingresosHoy),'text-teal-600'):'')
-    +fila('Gastos del día',`−${fmtMoney(d.gastosHoy)}`,'text-rose-600')
-    +fila('💵 Caja del día',fmtMoney(d.caja),'text-teal-700')
+    +fila(d.esHoy?'Gastos del día':'Gastos del periodo',`−${fmtMoney(d.gastosHoy)}`,'text-rose-600')
+    +fila(d.esHoy?'💵 Caja del día':'💵 Caja del periodo',fmtMoney(d.caja),'text-teal-700')
     +fila('Ganancia estimada',fmtMoney(d.ganancia),'text-brand-700')
-    +fila('Compras del día',fmtMoney(d.compras))
-    +`<button onclick="openGasto()" class="w-full mt-3 text-xs text-slate-500 border border-slate-200 rounded-xl py-2 hover:bg-slate-50">💸 Registrar un gasto de hoy</button>
+    +fila(d.esHoy?'Compras del día':'Compras del periodo',fmtMoney(d.compras))
+    +`${d.esHoy?`<button onclick="openGasto()" class="w-full mt-3 text-xs text-slate-500 border border-slate-200 rounded-xl py-2 hover:bg-slate-50">💸 Registrar un gasto de hoy</button>`:''}
      <div class="flex gap-2 mt-2">
-       <button onclick="window.open('https://wa.me/?text='+encodeURIComponent(cierreTexto()),'_blank')" class="flex-1 bg-teal-600 hover:bg-teal-700 text-white py-2.5 rounded-xl text-sm font-semibold">📲 WhatsApp</button>
-       <button onclick="printCierre()" class="flex-1 border border-slate-200 hover:bg-slate-50 py-2.5 rounded-xl text-sm">🖨️ Imprimir</button>
+       <button onclick="window.open('https://wa.me/?text='+encodeURIComponent(cierreTexto('${d.desde}','${d.hasta}')),'_blank')" class="flex-1 bg-teal-600 hover:bg-teal-700 text-white py-2.5 rounded-xl text-sm font-semibold">📲 WhatsApp</button>
+       <button onclick="printCierre('${d.desde}','${d.hasta}')" class="flex-1 border border-slate-200 hover:bg-slate-50 py-2.5 rounded-xl text-sm">🖨️ Imprimir</button>
      </div>`);
 }
-function printCierre(){
+function printCierre(desde,hasta){
   const w=window.open('','_blank','width=380,height=600'); if(!w) return toast('Permite ventanas emergentes para imprimir','err');
-  w.document.write(`<pre style="font:12px/1.5 monospace;white-space:pre-wrap;padding:12px">${esc(cierreTexto().replace(/\*/g,''))}</pre>`);
+  w.document.write(`<pre style="font:12px/1.5 monospace;white-space:pre-wrap;padding:12px">${esc(cierreTexto(desde,hasta).replace(/\*/g,''))}</pre>`);
   w.document.close(); w.focus(); w.print();
 }
 
@@ -1866,6 +1907,11 @@ function resetData(){ if(!confirm('Esto borrará TODOS los datos. ¿Continuar?')
 applyTheme();
 render();
 cloud.init();
+// Aviso al abrir la app si hay cobros/pagos con fecha límite a 5 días o menos
+setTimeout(()=>{
+  const n=creditosPorVencer().length;
+  if(n) toast(`🔔 Tienes ${n} crédito(s) por vencer — míralos en Inicio`);
+}, 900);
 // PWA: cachea la app para funcionar sin internet
 if('serviceWorker' in navigator && location.protocol==='https:'){ navigator.serviceWorker.register('sw.js').catch(()=>{}); }
 // Sincronización automática:
