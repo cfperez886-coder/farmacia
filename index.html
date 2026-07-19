@@ -307,16 +307,16 @@ const cloud = {
     if(now) return doPush();
     this.pushTimer = setTimeout(doPush, 1200);
   },
-  async pull(){
+  async pull(silencioso=false){
     if(!this.user) return;
     this.status='sync'; updateCloudBadges();
     try{
       const { data, error } = await this.sb.from('negocio_datos').select('data').eq('user_id', this.user.id).maybeSingle();
       if(error) throw error;
-      if(data && data.data) this.applyRemote(data.data);
+      if(data && data.data && JSON.stringify(data.data)!==JSON.stringify(DB)) this.applyRemote(data.data);
       this.status='ok'; this.lastSync=new Date(); updateCloudBadges(); if(cuentaAbierta()) openCuenta();
-      toast('Datos actualizados desde la nube');
-    }catch(e){ console.error(e); this.status='error'; updateCloudBadges(); toast('No se pudo actualizar','err'); }
+      if(!silencioso) toast('Datos actualizados desde la nube');
+    }catch(e){ console.error(e); this.status='error'; updateCloudBadges(); if(!silencioso) toast('No se pudo actualizar','err'); }
   },
   subscribe(){
     this.unsubscribe();
@@ -369,9 +369,8 @@ function openCuenta(){
         <div class="font-semibold break-all">${esc(cloud.user.email||'')}</div>
         <div class="text-sm mt-1" style="color:${info.hex}">${info.icon} ${info.text}${cloud.lastSync?` · ${cloud.lastSync.toLocaleTimeString('es-CO')}`:''}</div>
       </div>
-      <button onclick="cloudPull()" class="w-full border border-slate-200 rounded-xl py-2.5 text-sm mb-2 hover:bg-slate-50">🔄 Traer datos de la nube ahora</button>
       <button onclick="cloudLogout()" class="w-full border border-rose-200 text-rose-600 rounded-xl py-2.5 text-sm hover:bg-rose-50">Cerrar sesión</button>
-      <p class="text-[11px] text-slate-400 mt-3">Tus datos se guardan en tu proyecto de Supabase y se sincronizan solos en este y otros dispositivos donde inicies sesión con este correo.</p>`;
+      <p class="text-[11px] text-slate-400 mt-3">La sincronización es automática: cada cambio se sube solo a la nube y los cambios hechos en otros dispositivos llegan solos a este.</p>`;
   } else {
     body = `
       <p class="text-sm text-slate-500 mb-4">Inicia sesión para sincronizar tus datos entre la computadora y el celular. Si es tu primera vez, escribe correo y contraseña y toca <b>Crear cuenta</b>.</p>
@@ -500,10 +499,12 @@ const NAV = [
   { id:'reportes', label:'Reportes', icon:'📊' },
 ];
 
+// Solo lotes con existencias cuyo vencimiento cae dentro del rango de alerta (o ya vencidos)
 function alertsCount(){
-  const venc = DB.productos.reduce((s,p)=> s + (p.lotes||[]).filter(l=>{const d=daysUntil(l.venc); return l.venc && d!==null && d<=DB.config.alertaVencimiento;}).length, 0);
-  const bajo = DB.productos.filter(p=> stockDe(p) <= DB.config.alertaStock).length;
-  return venc+bajo;
+  return DB.productos.reduce((s,p)=> s + (p.lotes||[]).filter(l=>{
+    if(!l.venc || !(l.cantidad>0)) return false;
+    const d=daysUntil(l.venc); return d!==null && d<=DB.config.alertaVencimiento;
+  }).length, 0);
 }
 
 function render(){
@@ -558,7 +559,7 @@ function navBtnMobile(n){
   return `<button onclick="go('${n.id}')" class="flex flex-col items-center justify-center gap-0.5 py-2 text-[9px] ${active?'text-brand-700':'text-slate-400'}"><span class="text-base leading-none">${n.icon}</span><span class="truncate max-w-full">${n.label}</span></button>`;
 }
 
-function go(r){ route=r; location.hash=r; modal=null; clearScanConsumer(); render(); window.scrollTo(0,0); }
+function go(r){ route=r; location.hash=r; modal=null; render(); window.scrollTo(0,0); }
 window.addEventListener('hashchange',()=>{ const r=location.hash.replace('#',''); if(r&&r!==route){route=r; render();} });
 
 /* ============================================================
@@ -703,7 +704,7 @@ function viewDashboard(){
     + `<div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
         ${kpi('💵','Ventas de hoy', fmtMoney(totalHoy), `${ventasHoy.length} venta(s)`,'text-teal-600')}
         ${kpi('📅','Ventas del mes', fmtMoney(totalMes), `Ganancia: ${fmtMoney(gananciaMes)}`)}
-        ${kpi('🤝','Por cobrar (fiado)', fmtMoney(fiadoTotal), `${DB.clientes.filter(c=>c.saldo>0).length} cliente(s)`,'text-amber-600')}
+        ${kpi('🤝','Por cobrar (crédito)', fmtMoney(fiadoTotal), `${DB.clientes.filter(c=>c.saldo>0).length} cliente(s)`,'text-amber-600')}
         ${kpi('📦','Valor inventario', fmtMoney(valorInv), `${DB.productos.length} producto(s)`)}
       </div>
       <div class="grid md:grid-cols-2 gap-4">
@@ -731,10 +732,11 @@ function viewClientes(){
   const cs = DB.clientes.slice().sort((a,b)=>a.nombre.localeCompare(b.nombre));
   return pageHead('Clientes', `${cs.length} registrado(s)`, btnGhost('📊 Exportar Excel','exportClientesExcel()') + btnPrimary('+ Cliente','openCliente()'))
     + (cs.length? searchBar('listClientes','Buscar por nombre o teléfono…') + noRes('listClientes') + `<div id="listClientes" class="grid sm:grid-cols-2 gap-3">${cs.map(c=>`
-        <div data-search="${sdata(c.nombre+' '+(c.telefono||''))}" class="card p-4 flex items-start justify-between gap-3">
+        <div data-search="${sdata(c.nombre+' '+(c.negocio||'')+' '+(c.telefono||''))}" class="card p-4 flex items-start justify-between gap-3">
           <div class="min-w-0">
             <div class="font-semibold truncate">${esc(c.nombre)}</div>
-            <div class="text-sm text-slate-400 truncate">${esc(c.telefono||'Sin teléfono')}</div>
+            ${c.negocio?`<div class="text-xs text-slate-500 truncate">🏪 ${esc(c.negocio)}</div>`:''}
+            <div class="text-sm text-slate-400 truncate">${esc(c.telefono||'Sin teléfono')}${c.plazoMeses?` · crédito a ${c.plazoMeses} mes(es)`:''}</div>
             ${c.saldo>0?`<div class="text-xs mt-1 inline-block bg-amber-50 text-amber-700 px-2 py-0.5 rounded-full font-medium">Debe: ${fmtMoney(c.saldo)}</div>`:''}
           </div>
           <div class="flex flex-col gap-1 shrink-0">
@@ -762,7 +764,7 @@ function viewInventario(){
   let mostrados = 0;
   const filas = ps.map(p=>{
     const bajo = stockDe(p)<=DB.config.alertaStock;
-    const search = sdata(p.nombre+' '+(p.categoria||'')+' '+(p.codigo||''));
+    const search = sdata(p.nombre+' '+(p.categoria||'')+' '+(p.lotes||[]).map(l=>l.lote||'').join(' '));
     // Lotes ordenados del más próximo a vencer al más lejano (sin fecha = al final)
     let lotes = (p.lotes||[]).filter(l=>l.cantidad>0).slice().sort((a,b)=>{
       const av=a.venc||'9999-99-99', bv=b.venc||'9999-99-99'; return av<bv?-1:av>bv?1:0;
@@ -775,7 +777,7 @@ function viewInventario(){
     const st = filtroActivo ? lotes.reduce((s,l)=>s+l.cantidad,0) : stockDe(p);
     const nombreCell = `<div class="flex items-center gap-3">
         ${fotoSrc(p.foto)?`<img src="${fotoSrc(p.foto)}" class="w-10 h-10 rounded-lg object-cover border border-slate-100 shrink-0">`:`<div class="w-10 h-10 rounded-lg bg-slate-100 grid place-items-center text-slate-300 shrink-0">📦</div>`}
-        <div class="min-w-0"><div class="font-medium truncate">${esc(p.nombre)}</div><div class="text-xs text-slate-400 truncate">${esc(p.categoria||'Sin categoría')}${p.codigo?` · ${esc(p.codigo)}`:''}${lotes.length>1?` · ${lotes.length} lotes`:''}</div></div>
+        <div class="min-w-0"><div class="font-medium truncate">${esc(p.nombre)}</div><div class="text-xs text-slate-400 truncate">${esc(p.categoria||'Sin categoría')}${lotes.length===1&&lotes[0].lote?` · Lote ${esc(lotes[0].lote)}`:''}${lotes.length>1?` · ${lotes.length} lotes`:''}</div></div>
       </div>`;
     if(lotes.length<=1){
       const prox = lotes[0]?.venc;
@@ -809,7 +811,7 @@ function viewInventario(){
     return header + subFilas;
   }).join('');
   return pageHead('Inventario', `${filtroActivo?mostrados+' de '+ps.length:ps.length} producto(s) · Valor venta: ${fmtMoney(DB.productos.reduce((s,p)=>s+stockDe(p)*p.precioVenta,0))}`, btnGhost('📊 Exportar Excel','exportInventarioExcel()') + btnGhost('📦 Reposición','openReposicion()') + btnPrimary('+ Producto','openProducto()'))
-    + (ps.length? searchBar('listInventario','Buscar por nombre, categoría o código…') + invFiltroBar() + `<div class="card overflow-x-auto"><table class="w-full text-sm">
+    + (ps.length? searchBar('listInventario','Buscar por nombre, categoría o lote…') + invFiltroBar() + `<div class="card overflow-x-auto"><table class="w-full text-sm">
         <thead><tr class="text-xs text-slate-400 text-left"><th class="p-3 font-medium">Producto</th><th class="p-3 font-medium text-right">Precio</th><th class="p-3 font-medium text-center">Stock</th><th class="p-3 font-medium text-center">Vence</th><th></th></tr></thead>
         <tbody id="listInventario">${filas}</tbody></table></div>` + noRes('listInventario') + (filtroActivo && !mostrados? empty('🔍','Ningún lote vence en ese rango de fechas.') : '') : empty('📦','Sin productos. Crea el primero para empezar a vender.'));
 }
@@ -821,7 +823,7 @@ function viewVentas(){
     + (vs.length? searchBar('listVentas','Buscar por cliente, fecha o producto…') + dateRangeBar('listVentas') + noRes('listVentas') + `<div id="listVentas" class="space-y-2">${vs.map(v=>`
         <div data-search="${sdata(fmtConsec(v.consecutivo)+' '+(getCliente(v.clienteId)?.nombre||'')+' '+fmtDate(v.fecha)+' '+v.fecha+' '+v.items.map(i=>getProducto(i.prodId)?.nombre||'').join(' '))}" data-fecha="${v.fecha}" class="card p-4 flex items-center justify-between gap-3">
           <div class="min-w-0">
-            <div class="font-semibold">#${fmtConsec(v.consecutivo)} · ${fmtMoney(v.total)} ${v.fiado?'<span class="text-xs bg-amber-50 text-amber-700 px-2 py-0.5 rounded-full font-medium ml-1">Fiado</span>':''}</div>
+            <div class="font-semibold">#${fmtConsec(v.consecutivo)} · ${fmtMoney(v.total)} ${v.fiado?'<span class="text-xs bg-amber-50 text-amber-700 px-2 py-0.5 rounded-full font-medium ml-1">Crédito</span>':''}</div>
             <div class="text-xs text-slate-400 truncate">${fmtDate(v.fecha)} · ${v.items.reduce((s,i)=>s+i.cant,0)} artículo(s)${v.fiado?'':` · ${esc(v.metodo||'Efectivo')}`}${v.clienteId?` · ${esc(getCliente(v.clienteId)?.nombre||'')}`:''}</div>
           </div>
           <div class="text-right shrink-0">
@@ -835,8 +837,8 @@ function viewVentas(){
 function viewCompras(){
   const cs = DB.compras.slice().sort((a,b)=> b.fecha<a.fecha?-1: b.fecha>a.fecha?1: b.creado-a.creado);
   return pageHead('Compras', 'Entradas de mercancía a inventario', btnPrimary('+ Nueva compra','openCompra()'))
-    + (cs.length? searchBar('listCompras','Buscar por proveedor, fecha o producto…') + noRes('listCompras') + `<div id="listCompras" class="space-y-2">${cs.map(c=>`
-        <div data-search="${sdata((c.proveedor||'')+' '+fmtDate(c.fecha)+' '+c.fecha+' '+c.items.map(i=>getProducto(i.prodId)?.nombre||'').join(' '))}" class="card p-4 flex items-center justify-between gap-3">
+    + (cs.length? searchBar('listCompras','Buscar por proveedor, fecha o producto…') + dateRangeBar('listCompras') + noRes('listCompras') + `<div id="listCompras" class="space-y-2">${cs.map(c=>`
+        <div data-search="${sdata((c.proveedor||'')+' '+fmtDate(c.fecha)+' '+c.fecha+' '+c.items.map(i=>getProducto(i.prodId)?.nombre||'').join(' '))}" data-fecha="${c.fecha}" class="card p-4 flex items-center justify-between gap-3">
           <div class="min-w-0">
             <div class="font-semibold">${fmtMoney(c.total)}</div>
             <div class="text-xs text-slate-400 truncate">${fmtDate(c.fecha)} · ${esc(c.proveedor||'Proveedor')} · ${c.items.reduce((s,i)=>s+i.cant,0)} artículo(s)</div>
@@ -869,14 +871,19 @@ function viewVencimientos(){
 }
 
 /* ---------- REPORTES ---------- */
+let repFiltro = { desde:'', hasta:'' };
+function onRepFecha(which,val){ repFiltro[which]=val; renderView(); }
 function viewReportes(){
   const hoy=todayISO(), mes=hoy.slice(0,7);
-  const ventasMes = DB.ventas.filter(v=>v.fecha.slice(0,7)===mes);
+  const filtro = !!(repFiltro.desde||repFiltro.hasta);
+  const enRango = f => (!repFiltro.desde||f>=repFiltro.desde) && (!repFiltro.hasta||f<=repFiltro.hasta);
+  // Sin filtro de fechas: el mes actual. Con filtro: el rango elegido.
+  const ventasMes = filtro? DB.ventas.filter(v=>enRango(v.fecha)) : DB.ventas.filter(v=>v.fecha.slice(0,7)===mes);
   const totalMes = ventasMes.reduce((s,v)=>s+v.total,0);
   const gananciaMes = ventasMes.reduce((s,v)=>s+(v.ganancia||0),0);
-  const comprasMes = DB.compras.filter(c=>c.fecha.slice(0,7)===mes).reduce((s,c)=>s+c.total,0);
+  const comprasMes = (filtro? DB.compras.filter(c=>enRango(c.fecha)) : DB.compras.filter(c=>c.fecha.slice(0,7)===mes)).reduce((s,c)=>s+c.total,0);
 
-  // Top productos vendidos (por cantidad, este mes)
+  // Top productos vendidos (por cantidad, en el periodo)
   const conteo = {};
   ventasMes.forEach(v=>v.items.forEach(i=>{ conteo[i.prodId]=conteo[i.prodId]||{cant:0,total:0}; conteo[i.prodId].cant+=i.cant; conteo[i.prodId].total+=i.cant*i.precio; }));
   const top = Object.entries(conteo).map(([id,x])=>({p:getProducto(id),...x})).filter(x=>x.p).sort((a,b)=>b.cant-a.cant).slice(0,6);
@@ -888,13 +895,19 @@ function viewReportes(){
 
   const kpi=(icon,l,v,c)=>`<div class="card p-4 relative overflow-hidden"><span class="absolute -right-1 -top-1 text-4xl opacity-10 select-none">${icon}</span><div class="text-xs text-slate-400 font-medium">${l}</div><div class="text-xl font-bold mt-1 ${c||''}">${v}</div></div>`;
 
-  const gastosMes = DB.gastos.filter(g=>g.fecha.slice(0,7)===mes && g.tipo==='gasto').reduce((s,g)=>s+g.monto,0);
-  return pageHead('Reportes', new Date().toLocaleDateString('es-CO',{month:'long',year:'numeric'})+` · ${ventasMes.length} venta(s)`, btnGhost('💸 Gastos','go(\'gastos\')') + btnGhost('🧾 Cierre','openCierre()'))
-    + `<div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
-        ${kpi('💵','Ventas del mes',fmtMoney(totalMes),'text-teal-600')}
+  const gastosMes = (filtro? DB.gastos.filter(g=>enRango(g.fecha)) : DB.gastos.filter(g=>g.fecha.slice(0,7)===mes)).filter(g=>g.tipo==='gasto').reduce((s,g)=>s+g.monto,0);
+  const subtitulo = filtro ? `Del ${repFiltro.desde?fmtDate(repFiltro.desde):'inicio'} al ${repFiltro.hasta?fmtDate(repFiltro.hasta):'hoy'} · ${ventasMes.length} venta(s)` : new Date().toLocaleDateString('es-CO',{month:'long',year:'numeric'})+` · ${ventasMes.length} venta(s)`;
+  return pageHead('Reportes', subtitulo, btnGhost('💸 Gastos','go(\'gastos\')') + btnGhost('🧾 Cierre','openCierre()'))
+    + `<div class="flex flex-wrap items-end gap-2 mb-4">
+        <label class="text-xs text-slate-500">Desde<input type="date" value="${repFiltro.desde}" onchange="onRepFecha('desde',this.value)" class="${inputCls} mt-1"></label>
+        <label class="text-xs text-slate-500">Hasta<input type="date" value="${repFiltro.hasta}" onchange="onRepFecha('hasta',this.value)" class="${inputCls} mt-1"></label>
+        ${filtro?`<button onclick="repFiltro={desde:'',hasta:''};renderView()" class="text-xs text-rose-500 border border-rose-200 rounded-lg px-3 py-2.5 h-fit">Limpiar fechas</button>`:''}
+      </div>
+      <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+        ${kpi('💵',filtro?'Ventas del periodo':'Ventas del mes',fmtMoney(totalMes),'text-teal-600')}
         ${kpi('📈','Ganancia estimada',fmtMoney(gananciaMes),'text-brand-700')}
-        ${kpi('🛒','Compras del mes',fmtMoney(comprasMes),'text-slate-700')}
-        ${kpi('💸','Gastos del mes',fmtMoney(gastosMes),'text-rose-600')}
+        ${kpi('🛒',filtro?'Compras del periodo':'Compras del mes',fmtMoney(comprasMes),'text-slate-700')}
+        ${kpi('💸',filtro?'Gastos del periodo':'Gastos del mes',fmtMoney(gastosMes),'text-rose-600')}
       </div>
       <div class="grid md:grid-cols-2 gap-4">
         <div class="card p-4">
@@ -907,7 +920,7 @@ function viewReportes(){
             </div>`).join('')}</div>
         </div>
         <div class="card p-4">
-          <h3 class="font-semibold mb-3">Más vendidos (mes)</h3>
+          <h3 class="font-semibold mb-3">Más vendidos ${filtro?'(periodo)':'(mes)'}</h3>
           ${top.length? `<div class="space-y-2.5">${top.map(t=>`
             <div>
               <div class="flex justify-between text-sm mb-1"><span class="truncate">${esc(t.p.nombre)}</span><span class="text-slate-400 shrink-0 ml-2">${t.cant}u · ${fmtMoney(t.total)}</span></div>
@@ -924,7 +937,7 @@ function openModal(title, bodyHtml, size='md'){
   modal = { title, bodyHtml, size };
   renderModal();
 }
-function closeModal(){ modal=null; clearScanConsumer(); const m=$('#modal'); if(m) m.remove(); }
+function closeModal(){ modal=null; const m=$('#modal'); if(m) m.remove(); }
 function renderModal(){
   const old=$('#modal'); if(old) old.remove();
   const w = {sm:'max-w-sm',md:'max-w-lg',lg:'max-w-2xl'}[modal.size]||'max-w-lg';
@@ -946,20 +959,22 @@ const inputCls = "mt-1 w-full border border-slate-200 rounded-xl px-3 py-2.5 tex
 
 /* ----- Cliente ----- */
 function openCliente(id){
-  const c = id? getCliente(id) : {nombre:'',telefono:'',email:'',direccion:'',notas:'',saldo:0};
+  const c = id? getCliente(id) : {nombre:'',negocio:'',telefono:'',email:'',direccion:'',notas:'',saldo:0,plazoMeses:1};
   openModal(id?'Editar cliente':'Nuevo cliente',
     `<form onsubmit="saveCliente(event,'${id||''}')">
       ${field('Nombre *',`<input name="nombre" required value="${esc(c.nombre)}" class="${inputCls}" placeholder="Nombre del cliente">`)}
+      ${field('Nombre del negocio',`<input name="negocio" value="${esc(c.negocio||'')}" class="${inputCls}" placeholder="Ej: Droguería La Esperanza">`)}
       ${field('Teléfono',`<input name="telefono" value="${esc(c.telefono||'')}" class="${inputCls}" placeholder="300 000 0000">`)}
       ${field('Correo',`<input name="email" type="email" value="${esc(c.email||'')}" class="${inputCls}">`)}
       ${field('Dirección',`<input name="direccion" value="${esc(c.direccion||'')}" class="${inputCls}">`)}
+      ${field('Plazo de venta a crédito (meses)',`<input name="plazoMeses" type="number" min="1" step="1" value="${c.plazoMeses||1}" class="${inputCls}" placeholder="1">`)}
       ${field('Notas',`<textarea name="notas" rows="2" class="${inputCls}">${esc(c.notas||'')}</textarea>`)}
       ${id && (c.movs||[]).length ? `<div class="bg-slate-50 rounded-xl p-3 mb-1">
         <div class="text-xs font-medium text-slate-500 mb-2">Historial de deuda${c.saldo>0?` · debe <b class="text-amber-700">${fmtMoney(c.saldo)}</b>`:''}</div>
         <div class="space-y-1 max-h-32 overflow-y-auto">${c.movs.slice(-12).reverse().map(m=>`
           <div class="text-xs">
             <div class="flex justify-between">
-              <span class="text-slate-400">${fmtDate(m.fecha)} · ${m.tipo==='abono'?'Abonó':m.tipo==='fiado'?'Compró fiado':'Venta anulada'}</span>
+              <span class="text-slate-400">${fmtDate(m.fecha)} · ${m.tipo==='abono'?'Abonó':m.tipo==='fiado'?'Compró a crédito':'Venta anulada'}</span>
               <span class="font-medium ${m.tipo==='fiado'?'text-amber-700':'text-teal-600'}">${m.tipo==='fiado'?'+':'−'}${fmtMoney(m.monto)}</span>
             </div>
             ${m.tipo==='fiado'&&(m.items||[]).length?`<div class="text-slate-400 truncate">${m.items.map(i=>esc(i.nombre)+' ×'+i.cant).join(', ')}</div>`:''}
@@ -978,7 +993,7 @@ function openCliente(id){
 }
 function saveCliente(e,id){
   e.preventDefault(); const f=e.target;
-  const obj={ nombre:f.nombre.value.trim(), telefono:f.telefono.value.trim(), email:f.email.value.trim(), direccion:f.direccion.value.trim(), notas:f.notas.value.trim() };
+  const obj={ nombre:f.nombre.value.trim(), negocio:f.negocio.value.trim(), telefono:f.telefono.value.trim(), email:f.email.value.trim(), direccion:f.direccion.value.trim(), notas:f.notas.value.trim(), plazoMeses:Math.max(1,+f.plazoMeses.value||1) };
   if(id){ Object.assign(getCliente(id),obj); } else { DB.clientes.push({id:uid(),saldo:0,...obj}); }
   store.save(); closeModal(); render(); toast('Cliente guardado');
 }
@@ -995,7 +1010,7 @@ function estadoCuentaTexto(c){
   const lineas=movs.map(m=>{
     if(m.tipo==='fiado'){
       const prods=(m.items||[]).map(i=>`${i.nombre} x${i.cant}`).join(', ');
-      return `• ${fmtDate(m.fecha)} — Fiado${prods?`: ${prods}`:''} — ${fmtMoney(m.monto)}`;
+      return `• ${fmtDate(m.fecha)} — Crédito${prods?`: ${prods}`:''} — ${fmtMoney(m.monto)}${m.vence?` (pagar antes del ${fmtDate(m.vence)})`:''}`;
     }
     if(m.tipo==='abono') return `• ${fmtDate(m.fecha)} — Abono recibido — −${fmtMoney(m.monto)}`;
     return `• ${fmtDate(m.fecha)} — Venta anulada — −${fmtMoney(m.monto)}`;
@@ -1017,7 +1032,7 @@ function openEstadoCuenta(id){
         if(m.tipo==='fiado'){
           const prods=(m.items||[]).map(i=>esc(i.nombre)+' ×'+i.cant).join(', ');
           return `<div class="border-b border-slate-100 pb-2">
-            <div class="flex justify-between text-sm"><span class="font-medium">${fmtDate(m.fecha)} · Fiado</span><span class="font-semibold text-amber-600">+${fmtMoney(m.monto)}</span></div>
+            <div class="flex justify-between text-sm"><span class="font-medium">${fmtDate(m.fecha)} · Crédito${m.vence?` <span class="text-xs text-amber-600 font-normal">· pagar antes del ${fmtDate(m.vence)}</span>`:''}</span><span class="font-semibold text-amber-600">+${fmtMoney(m.monto)}</span></div>
             ${prods?`<div class="text-xs text-slate-400 mt-0.5">${prods}</div>`:''}
           </div>`;
         }
@@ -1055,14 +1070,14 @@ function openProducto(id){
           </label>
           ${field('Categoría',`<input name="categoria" value="${esc(p.categoria||'')}" class="${inputCls}" placeholder="Ej: Medicamento">`)}</div>
       </div>
-      ${field('Código / SKU <span class="text-slate-300 font-normal">— 🖥️ escanéalo aquí con un lector USB</span>',`<input id="prodCodigo" name="codigo" value="${esc(p.codigo||'')}" class="${inputCls}" placeholder="Código de barras (opcional)">`)}
       <div class="grid grid-cols-3 gap-2">
         ${field('P. compra',`<input name="precioCompra" type="number" min="0" step="any" value="${p.precioCompra||''}" class="${inputCls}">`)}
         ${field('P. venta *',`<input name="precioVenta" type="number" min="0" step="any" required value="${p.precioVenta||''}" class="${inputCls}">`)}
         ${field('Unidad',`<input name="unidad" value="${esc(p.unidad||'u')}" class="${inputCls}" placeholder="u, kg, lt">`)}
       </div>
-      ${!id? `<div class="grid grid-cols-2 gap-2">
+      ${!id? `<div class="grid grid-cols-3 gap-2">
         ${field('Stock inicial',`<input name="stockIni" type="number" min="0" step="any" value="0" class="${inputCls}">`)}
+        ${field('Lote',`<input name="loteIni" class="${inputCls}" placeholder="Lote del medicamento">`)}
         ${field('Vence (opcional)',`<input name="vencIni" type="date" class="${inputCls}">`)}
       </div>` : `<div class="bg-slate-50 rounded-xl p-3 text-sm text-slate-500 mb-3">Stock actual: <b class="text-slate-700">${stActual} ${esc(p.unidad||'u')}</b>. Para ajustar usa <button type="button" onclick="ajustarStock('${id}')" class="text-brand-700 font-medium underline">ajuste manual</button> o registra una compra.</div>`}
       <div class="flex gap-2 mt-4">
@@ -1073,11 +1088,11 @@ function openProducto(id){
 }
 function saveProducto(e,id){
   e.preventDefault(); const f=e.target;
-  const obj={ nombre:f.nombre.value.trim(), categoria:f.categoria.value.trim(), codigo:f.codigo.value.trim(), unidad:f.unidad.value.trim()||'u', precioCompra:+f.precioCompra.value||0, precioVenta:+f.precioVenta.value||0, foto:fotoTmp };
+  const obj={ nombre:f.nombre.value.trim(), categoria:f.categoria.value.trim(), unidad:f.unidad.value.trim()||'u', precioCompra:+f.precioCompra.value||0, precioVenta:+f.precioVenta.value||0, foto:fotoTmp };
   if(id){ Object.assign(getProducto(id),obj); }
   else {
     const p={id:uid(),lotes:[],...obj}; DB.productos.push(p);
-    const st=+f.stockIni.value||0; if(st>0) agregarLote(p.id,st,f.vencIni.value,obj.precioCompra);
+    const st=+f.stockIni.value||0; if(st>0) agregarLote(p.id,st,f.vencIni.value,obj.precioCompra,f.loteIni.value.trim());
   }
   store.save(); closeModal(); render(); toast('Producto guardado');
 }
@@ -1091,105 +1106,10 @@ function ajustarStock(id){
   store.save(); openProducto(id); render(); toast('Stock ajustado');
 }
 
-/* ============================================================
-   LECTOR DE CÓDIGO DE BARRAS
-   Dos modos:
-   1) Lector USB (escritorio): funciona como un teclado — escribe
-      los dígitos muy rápido y termina con Enter. Lo detectamos por
-      la velocidad (ráfaga) + Enter, sin librerías ni permisos.
-   2) Cámara (celular): usa la API nativa BarcodeDetector.
-   El código escaneado se busca en el campo `codigo` del producto.
-   ============================================================ */
-const getProductoPorCodigo = code => {
-  const c = String(code||'').trim(); if(!c) return null;
-  return DB.productos.find(p => (p.codigo||'').trim() === c) || null;
-};
-let scanConsumer = null; // función(code) activa según el contexto (p.ej. venta abierta)
-function setScanConsumer(fn){ scanConsumer = fn; }
-function clearScanConsumer(){ scanConsumer = null; }
-
-// --- Lector USB (keyboard-wedge) ---
-(function initWedge(){
-  let buf='', last=0;
-  document.addEventListener('keydown', function(e){
-    if(e.key === 'Enter'){
-      if(/^\d{6,}$/.test(buf)){ const code=buf; buf=''; onWedgeScan(code, e); }
-      else buf='';
-      return;
-    }
-    if(e.key && e.key.length === 1){
-      const now = Date.now();
-      if(now - last > 60) buf = '';   // si viene lento es tecleo humano, no un escáner
-      buf += e.key; last = now;
-    }
-  }, true);
-})();
-function onWedgeScan(code, e){
-  if(scanConsumer){ if(e) e.preventDefault(); return scanConsumer(code); }
-  const el = document.getElementById('prodCodigo');       // formulario de producto abierto
-  if(el){ if(e) e.preventDefault(); el.value = code; toast('Código capturado ✓'); return; }
-  if(!modal){                                             // desde cualquier pantalla sin modal: inicia una venta
-    const p = getProductoPorCodigo(code);
-    if(p && stockDe(p) > 0){ if(e) e.preventDefault(); openVenta(); ventaScan(code); }
-    else if(p){ toast(p.nombre + ': sin stock', 'err'); }
-    else { toast('Código ' + code + ' no está en tu inventario', 'err'); }
-  }
-}
-
-// --- Cámara (BarcodeDetector) ---
-let camStream=null, camRAF=null, camCancelCb=null;
-async function openCamScan(onCode, onCancel){
-  if(!('BarcodeDetector' in window) || !(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)){
-    toast('La cámara no está disponible en este navegador. Usa un lector USB o escribe el código.', 'err');
-    if(onCancel) onCancel(); return;
-  }
-  camCancelCb = onCancel || null;
-  openModal('📷 Escanear código', `
-    <div>
-      <div class="rounded-2xl overflow-hidden bg-black relative" style="aspect-ratio:4/3">
-        <video id="camVid" playsinline muted autoplay style="width:100%;height:100%;object-fit:cover"></video>
-        <div class="absolute inset-x-8 top-1/2 -translate-y-1/2 h-24 border-2 border-white/80 rounded-xl"></div>
-      </div>
-      <p class="text-xs text-slate-400 text-center mt-2">Apunta la cámara al código de barras del producto.</p>
-      <button type="button" onclick="closeCamScan(true)" class="mt-3 w-full border border-slate-200 rounded-xl py-2.5 text-sm hover:bg-slate-50">Cancelar</button>
-    </div>`, 'sm');
-  try{
-    const det = new BarcodeDetector();
-    camStream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:'environment' } });
-    const vid = document.getElementById('camVid'); if(!vid){ closeCamScan(false); return; }
-    vid.srcObject = camStream; await vid.play();
-    const tick = async ()=>{
-      if(!camStream) return;
-      try{ const found = await det.detect(vid); if(found && found.length){ const code=found[0].rawValue; closeCamScan(false); if(onCode) onCode(code); return; } }catch(_){}
-      camRAF = requestAnimationFrame(tick);
-    };
-    camRAF = requestAnimationFrame(tick);
-  }catch(err){ console.error(err); closeCamScan(false); toast('No se pudo abrir la cámara (¿permiso denegado?)', 'err'); if(onCancel) onCancel(); }
-}
-function closeCamScan(cancelled){
-  if(camRAF){ cancelAnimationFrame(camRAF); camRAF=null; }
-  if(camStream){ camStream.getTracks().forEach(t=>t.stop()); camStream=null; }
-  const cb = camCancelCb; camCancelCb=null;
-  closeModal();
-  if(cancelled && cb) cb();
-}
-
 /* ----- Venta ----- */
 let carritoV=[];
 function openVenta(){ carritoV=[]; showVenta(); }
-function showVenta(){ openModal('Nueva venta', ventaBody(), 'lg'); setScanConsumer(ventaScan); }
-// Agrega al carrito el producto cuyo código de barras se escaneó
-function ventaScan(code){
-  const p = getProductoPorCodigo(code);
-  if(!p) return toast('Código ' + code + ' no está en tu inventario', 'err');
-  if(stockDe(p) <= 0) return toast(p.nombre + ': sin stock', 'err');
-  const ya = carritoV.filter(i=>i.prodId===p.id).reduce((s,i)=>s+i.cant,0);
-  if(ya + 1 > stockDe(p)) return toast('Solo hay ' + stockDe(p) + ' de ' + p.nombre, 'err');
-  const ex = carritoV.find(i=>i.prodId===p.id && i.precio===p.precioVenta);
-  if(ex) ex.cant += 1; else carritoV.push({ prodId:p.id, cant:1, precio:p.precioVenta, costo:p.precioCompra||0 });
-  if($('#modal')) refreshVenta(); else showVenta();
-  toast('✓ ' + p.nombre);
-}
+function showVenta(){ openModal('Nueva venta', ventaBody(), 'lg'); }
 function ventaBody(){
   const total=carritoV.reduce((s,i)=>s+i.cant*i.precio,0);
   const disponibles=DB.productos.filter(p=>stockDe(p)>0);
@@ -1206,8 +1126,6 @@ function ventaBody(){
       </div></div>`;
   }
   return `
-    <button type="button" onclick="openCamScan(ventaScan, showVenta)" class="w-full mb-2 border border-brand text-brand-700 font-semibold rounded-xl py-2 hover:bg-brand-50 flex items-center justify-center gap-2">📷 Escanear código de barras</button>
-    <p class="text-[11px] text-slate-400 text-center mb-2 -mt-1">📱 con la cámara del celular · 🖥️ o con un lector USB (se agrega solo al escanear)</p>
     <div class="flex gap-2 mb-1">
       <select id="vProd" onchange="onProdVentaChange()" class="${inputCls} flex-1"><option value="">Agregar producto…</option>${opts}</select>
       <input id="vCant" type="number" min="1" value="1" class="${inputCls} w-16" title="Cantidad">
@@ -1225,11 +1143,33 @@ function ventaBody(){
       </div>`;}).join('')}</div>` : `<p class="text-sm text-slate-400 text-center py-4">Agrega productos a la venta.</p>`}
     <div class="flex justify-between items-center text-lg font-bold border-t border-slate-100 pt-3 mb-3"><span>Total</span><span class="text-teal-600">${fmtMoney(total)}</span></div>
     ${field('Método de pago',`<select id="vMetodo" class="${inputCls}"><option>Efectivo</option><option>Nequi</option><option>Daviplata</option><option>Tarjeta</option><option>Transferencia</option></select>`)}
-    ${DB.clientes.length?field('Cliente (opcional)',`<select id="vCliente" class="${inputCls}"><option value="">Sin cliente</option>${clOpts}</select>`):''}
-    <label class="flex items-center gap-2 mb-4 text-sm"><input type="checkbox" id="vFiado"> Venta fiada (queda como deuda del cliente)</label>
+    ${DB.clientes.length?field('Cliente (opcional)',`<select id="vCliente" onchange="onVentaCliente()" class="${inputCls}"><option value="">Sin cliente</option>${clOpts}</select>`):''}
+    <label class="flex items-center gap-2 mb-2 text-sm"><input type="checkbox" id="vFiado" onchange="onVentaCredito()"> Venta a crédito (queda como deuda del cliente)</label>
+    <div id="vPlazoWrap" class="hidden mb-4">
+      ${field('Plazo de pago (meses)',`<input id="vPlazo" type="number" min="1" step="1" value="1" oninput="actualizarPlazoInfo()" class="${inputCls}">`)}
+      <p id="vPlazoInfo" class="text-[11px] text-slate-400 -mt-2"></p>
+    </div>
     <button type="button" onclick="confirmVenta()" ${carritoV.length?'':'disabled'} class="w-full bg-teal-600 disabled:opacity-40 hover:bg-teal-700 text-white font-semibold py-3 rounded-xl">Registrar venta · ${fmtMoney(total)}</button>`;
 }
 function refreshVenta(){ const b=$('#modal .p-5'); if(b) b.innerHTML=ventaBody(); }
+// Suma meses a una fecha ISO (para la fecha límite del crédito)
+function addMonths(iso, m){ const d=new Date(iso+'T12:00:00'); d.setMonth(d.getMonth()+(+m||0)); return isoLocal(d); }
+function onVentaCredito(){
+  const on=$('#vFiado')?.checked; const w=$('#vPlazoWrap');
+  if(w) w.classList.toggle('hidden',!on);
+  if(on) onVentaCliente();
+}
+function onVentaCliente(){
+  const c=getCliente($('#vCliente')?.value||'');
+  const inp=$('#vPlazo');
+  if(inp && c && c.plazoMeses) inp.value=c.plazoMeses; // trae el plazo configurado en el cliente
+  actualizarPlazoInfo();
+}
+function actualizarPlazoInfo(){
+  const el=$('#vPlazoInfo'); if(!el) return;
+  const m=Math.max(1,+($('#vPlazo')?.value)||1);
+  el.textContent='Fecha límite de pago: '+fmtDate(addMonths(todayISO(),m));
+}
 function onProdVentaChange(){
   const id=$('#vProd').value; const p=getProducto(id);
   $('#vPrecio').value = p ? p.precioVenta : '';
@@ -1251,17 +1191,19 @@ function confirmVenta(){
   if(!carritoV.length) return;
   const fiado=$('#vFiado')?.checked||false;
   const clienteId=$('#vCliente')?.value||'';
-  if(fiado && !clienteId) return toast('Elige un cliente para venta fiada','err');
+  if(fiado && !clienteId) return toast('Elige un cliente para la venta a crédito','err');
   const total=carritoV.reduce((s,i)=>s+i.cant*i.precio,0);
   const ganancia=carritoV.reduce((s,i)=>s+i.cant*(i.precio-(i.costo||0)),0);
   carritoV.forEach(i=>descontarStock(i.prodId,i.cant));
-  const metodo = fiado ? 'Fiado' : (($('#vMetodo')&&$('#vMetodo').value)||'Efectivo');
-  const venta={ id:uid(), consecutivo:DB.config.nextConsecutivo++, fecha:todayISO(), creado:Date.now(), items:carritoV.map(i=>({prodId:i.prodId,cant:i.cant,precio:i.precio,costo:i.costo})), total, ganancia, fiado, metodo, clienteId:clienteId||null };
+  const metodo = fiado ? 'Crédito' : (($('#vMetodo')&&$('#vMetodo').value)||'Efectivo');
+  const plazoMeses = fiado ? Math.max(1,+($('#vPlazo')?.value)||getCliente(clienteId)?.plazoMeses||1) : null;
+  const venceCredito = fiado ? addMonths(todayISO(), plazoMeses) : null;
+  const venta={ id:uid(), consecutivo:DB.config.nextConsecutivo++, fecha:todayISO(), creado:Date.now(), items:carritoV.map(i=>({prodId:i.prodId,cant:i.cant,precio:i.precio,costo:i.costo})), total, ganancia, fiado, metodo, clienteId:clienteId||null, plazoMeses, venceCredito };
   DB.ventas.push(venta);
   if(fiado && clienteId){
     const c=getCliente(clienteId); c.saldo=(c.saldo||0)+total; c.movs=c.movs||[];
     const items = carritoV.map(i=>({nombre:getProducto(i.prodId)?.nombre||'(producto)', cant:i.cant}));
-    c.movs.push({fecha:todayISO(),tipo:'fiado',monto:total,ventaId:venta.id,items});
+    c.movs.push({fecha:todayISO(),tipo:'fiado',monto:total,ventaId:venta.id,items,plazoMeses,vence:venceCredito});
   }
   store.save(); closeModal(); render(); toast('Venta registrada ✔');
   verVenta(venta.id); // muestra el recibo con opciones de WhatsApp/imprimir
@@ -1269,7 +1211,7 @@ function confirmVenta(){
 function verVenta(id){
   const v=DB.ventas.find(x=>x.id===id); if(!v)return;
   openModal('Detalle de venta',
-    `<div class="text-sm text-slate-400 mb-3">Venta #${fmtConsec(v.consecutivo)} · ${fmtDate(v.fecha)}${v.clienteId?` · ${esc(getCliente(v.clienteId)?.nombre||'')}`:''}${v.fiado?' · <span class="text-amber-600">Fiado</span>':` · ${esc(v.metodo||'Efectivo')}`}</div>
+    `<div class="text-sm text-slate-400 mb-3">Venta #${fmtConsec(v.consecutivo)} · ${fmtDate(v.fecha)}${v.clienteId?` · ${esc(getCliente(v.clienteId)?.nombre||'')}`:''}${v.fiado?' · <span class="text-amber-600">Crédito</span>'+(v.venceCredito?` · <span class="text-amber-600">pagar antes del ${fmtDate(v.venceCredito)}</span>`:''):` · ${esc(v.metodo||'Efectivo')}`}</div>
      <div class="space-y-2 mb-3">${v.items.map(i=>{const p=getProducto(i.prodId);return `<div class="flex justify-between text-sm"><span>${esc(p?.nombre||'(eliminado)')} × ${i.cant}</span><span>${fmtMoney(i.cant*i.precio)}</span></div>`;}).join('')}</div>
      <div class="flex justify-between font-bold border-t border-slate-100 pt-2"><span>Total</span><span>${fmtMoney(v.total)}</span></div>
      <div class="flex justify-between text-sm text-teal-600 mt-1"><span>Ganancia</span><span>+${fmtMoney(v.ganancia)}</span></div>
@@ -1284,7 +1226,7 @@ function verVenta(id){
 function reciboTexto(v){
   const cl = v.clienteId ? getCliente(v.clienteId) : null;
   const lineas = v.items.map(i=>{ const p=getProducto(i.prodId); return `• ${p?p.nombre:'(producto)'} x${i.cant} = ${fmtMoney(i.cant*i.precio)}`; });
-  return `🧾 *${DB.config.negocio}*\nRecibo de venta #${fmtConsec(v.consecutivo)} — ${fmtDate(v.fecha)}${cl?`\nCliente: ${cl.nombre}`:''}\n\n${lineas.join('\n')}\n\n*TOTAL: ${fmtMoney(v.total)}*\nPago: ${v.fiado?'Fiado':(v.metodo||'Efectivo')}\n\n¡Gracias por su compra! 💊`;
+  return `🧾 *${DB.config.negocio}*\nRecibo de venta #${fmtConsec(v.consecutivo)} — ${fmtDate(v.fecha)}${cl?`\nCliente: ${cl.nombre}`:''}\n\n${lineas.join('\n')}\n\n*TOTAL: ${fmtMoney(v.total)}*\nPago: ${v.fiado?'Crédito':(v.metodo||'Efectivo')}\n\n¡Gracias por su compra! 💊`;
 }
 function waVenta(id){
   const v=DB.ventas.find(x=>x.id===id); if(!v) return;
@@ -1401,7 +1343,7 @@ function cierreDatos(){
 function cierreTexto(){
   const d=cierreDatos();
   const metodos=Object.entries(d.porMetodo).map(([m,v])=>`   - ${m}: ${fmtMoney(v)}`).join('\n');
-  return `🧾 *${DB.config.negocio}* — Cierre de caja ${fmtDate(d.hoy)}\n\nVentas: ${d.n} por ${fmtMoney(d.total)}\n• De contado: ${fmtMoney(d.contado)}${metodos?`\n${metodos}`:''}\n• Fiado: ${fmtMoney(d.fiado)}\nAbonos recibidos: ${fmtMoney(d.abonos)}${d.ingresosHoy?`\nIngresos extra: ${fmtMoney(d.ingresosHoy)}`:''}\nGastos del día: ${fmtMoney(d.gastosHoy)}\n\n💵 Caja del día: ${fmtMoney(d.caja)}\n📈 Ganancia estimada: ${fmtMoney(d.ganancia)}\n🛒 Compras del día: ${fmtMoney(d.compras)}`;
+  return `🧾 *${DB.config.negocio}* — Cierre de caja ${fmtDate(d.hoy)}\n\nVentas: ${d.n} por ${fmtMoney(d.total)}\n• De contado: ${fmtMoney(d.contado)}${metodos?`\n${metodos}`:''}\n• Crédito: ${fmtMoney(d.fiado)}\nAbonos recibidos: ${fmtMoney(d.abonos)}${d.ingresosHoy?`\nIngresos extra: ${fmtMoney(d.ingresosHoy)}`:''}\nGastos del día: ${fmtMoney(d.gastosHoy)}\n\n💵 Caja del día: ${fmtMoney(d.caja)}\n📈 Ganancia estimada: ${fmtMoney(d.ganancia)}\n🛒 Compras del día: ${fmtMoney(d.compras)}`;
 }
 function openCierre(){
   const d=cierreDatos();
@@ -1411,7 +1353,7 @@ function openCierre(){
     fila('Ventas del día',`${d.n} venta(s) · ${fmtMoney(d.total)}`)
     +fila('De contado',fmtMoney(d.contado))
     +metodosHtml
-    +fila('Fiado',fmtMoney(d.fiado),'text-amber-600')
+    +fila('Crédito',fmtMoney(d.fiado),'text-amber-600')
     +fila('Abonos recibidos',fmtMoney(d.abonos),'text-teal-600')
     +(d.ingresosHoy?fila('Ingresos extra',fmtMoney(d.ingresosHoy),'text-teal-600'):'')
     +fila('Gastos del día',`−${fmtMoney(d.gastosHoy)}`,'text-rose-600')
@@ -1552,8 +1494,8 @@ function excelFechaISO(val){
 }
 function descargarPlantillaInventario(){
   if(!excelDisponible()) return;
-  const headers = ['nombre','categoria','codigo','unidad','precioCompra','precioVenta','stockInicial','lote','vencimiento'];
-  const ejemplo = ['ACETAMINOFEN 500 MG CJ X 20 TAB','Medicamento','7701234567890','u',1200,2000,50,'L2026A','2026-12-31'];
+  const headers = ['nombre','categoria','unidad','precioCompra','precioVenta','stockInicial','lote','vencimiento'];
+  const ejemplo = ['ACETAMINOFEN 500 MG CJ X 20 TAB','Medicamento','u',1200,2000,50,'L2026A','2026-12-31'];
   const ws = XLSX.utils.aoa_to_sheet([headers, ejemplo]);
   ws['!cols'] = headers.map(h=>({wch:Math.max(14,h.length+4)}));
   const instrucciones = [
@@ -1562,7 +1504,7 @@ function descargarPlantillaInventario(){
     ['Cómo usarla:'],
     ['1. Completa una fila por cada producto/lote en la hoja "Inventario".'],
     ['2. nombre: obligatorio. Si ya existe un producto con ese nombre, se actualiza; si no, se crea.'],
-    ['3. categoria, codigo, unidad: opcionales.'],
+    ['3. categoria, unidad: opcionales.'],
     ['4. precioCompra, precioVenta: números sin puntos ni signos ($).'],
     ['5. stockInicial: cantidad del lote a ingresar (déjalo vacío o en 0 para solo crear/actualizar el producto sin stock).'],
     ['6. lote: código de lote (opcional).'],
@@ -1600,16 +1542,14 @@ function procesarCargueMasivo(){
         if(!nombre){ saltados++; return; }
         let p = DB.productos.find(x=>x.nombre.toLowerCase()===nombre.toLowerCase());
         const categoria = String(r.categoria||r.Categoria||'').trim();
-        const codigo = String(r.codigo||r.Codigo||r['Código']||'').trim();
         const unidad = String(r.unidad||r.Unidad||'').trim();
         const precioCompra = +r.precioCompra||+r['P. compra']||0;
         const precioVenta = +r.precioVenta||+r['P. venta']||0;
         if(!p){
-          p = { id:uid(), nombre, categoria, codigo, unidad:unidad||'u', precioCompra, precioVenta, lotes:[] };
+          p = { id:uid(), nombre, categoria, unidad:unidad||'u', precioCompra, precioVenta, lotes:[] };
           DB.productos.push(p); creados++;
         } else {
           if(categoria) p.categoria=categoria;
-          if(codigo) p.codigo=codigo;
           if(unidad) p.unidad=unidad;
           if(precioCompra) p.precioCompra=precioCompra;
           if(precioVenta) p.precioVenta=precioVenta;
@@ -1639,9 +1579,9 @@ function exportInventarioExcel(){
   ps.forEach(p=>{
     const lotes = (p.lotes||[]).filter(l=>l.cantidad>0);
     if(!lotes.length){
-      detalle.push({ Producto:p.nombre, Categoría:p.categoria||'', Código:p.codigo||'', Unidad:p.unidad||'u', Lote:'', Cantidad:0, Vencimiento:'', 'Precio compra':p.precioCompra||0, 'Precio venta':p.precioVenta||0, 'Valor venta':0 });
+      detalle.push({ Producto:p.nombre, Categoría:p.categoria||'', Unidad:p.unidad||'u', Lote:'', Cantidad:0, Vencimiento:'', 'Precio compra':p.precioCompra||0, 'Precio venta':p.precioVenta||0, 'Valor venta':0 });
     } else {
-      lotes.forEach(l=> detalle.push({ Producto:p.nombre, Categoría:p.categoria||'', Código:p.codigo||'', Unidad:p.unidad||'u', Lote:l.lote||'', Cantidad:l.cantidad, Vencimiento:l.venc||'', 'Precio compra':p.precioCompra||0, 'Precio venta':p.precioVenta||0, 'Valor venta':l.cantidad*(p.precioVenta||0) }));
+      lotes.forEach(l=> detalle.push({ Producto:p.nombre, Categoría:p.categoria||'', Unidad:p.unidad||'u', Lote:l.lote||'', Cantidad:l.cantidad, Vencimiento:l.venc||'', 'Precio compra':p.precioCompra||0, 'Precio venta':p.precioVenta||0, 'Valor venta':l.cantidad*(p.precioVenta||0) }));
     }
   });
   const valorVenta = ps.reduce((s,p)=>s+stockDe(p)*(p.precioVenta||0),0);
@@ -1666,7 +1606,7 @@ function exportInventarioExcel(){
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(kpi), 'KPI');
   const wsD = XLSX.utils.json_to_sheet(detalle);
-  wsD['!cols'] = [{wch:32},{wch:16},{wch:14},{wch:8},{wch:12},{wch:10},{wch:12},{wch:12},{wch:12},{wch:12}];
+  wsD['!cols'] = [{wch:32},{wch:16},{wch:8},{wch:12},{wch:10},{wch:12},{wch:12},{wch:12},{wch:12}];
   XLSX.utils.book_append_sheet(wb, wsD, 'Detalle');
   XLSX.writeFile(wb, `inventario-${todayISO()}.xlsx`);
 }
@@ -1679,7 +1619,7 @@ function exportVentasExcel(){
   vs.sort((a,b)=> a.fecha<b.fecha?-1:a.fecha>b.fecha?1:(a.creado||0)-(b.creado||0));
   const detalle = vs.map(v=>({
     'N°':fmtConsec(v.consecutivo), Fecha:v.fecha, Cliente:v.clienteId?(getCliente(v.clienteId)?.nombre||''):'',
-    'Método':v.fiado?'Fiado':(v.metodo||'Efectivo'), Productos:v.items.map(i=>`${getProducto(i.prodId)?.nombre||'(eliminado)'} x${i.cant}`).join(', '),
+    'Método':v.fiado?'Crédito':(v.metodo||'Efectivo'), Productos:v.items.map(i=>`${getProducto(i.prodId)?.nombre||'(eliminado)'} x${i.cant}`).join(', '),
     Total:v.total, Ganancia:v.ganancia||0
   }));
   const totalVentas = vs.reduce((s,v)=>s+v.total,0);
@@ -1696,7 +1636,7 @@ function exportVentasExcel(){
     ['Ventas', vs.length],
     ['Total vendido', totalVentas],
     ['Ganancia estimada', totalGanancia],
-    ['Total fiado', totalFiado],
+    ['Total a crédito', totalFiado],
     ['Ticket promedio', vs.length?Math.round(totalVentas/vs.length):0],
     ...Object.entries(porMetodo).map(([m,v])=>[`Ventas ${m}`, v]),
   ];
@@ -1786,9 +1726,12 @@ render();
 cloud.init();
 // PWA: cachea la app para funcionar sin internet
 if('serviceWorker' in navigator && location.protocol==='https:'){ navigator.serviceWorker.register('sw.js').catch(()=>{}); }
-// Si hay un guardado pendiente y se cierra/minimiza la app, súbelo ya
+// Sincronización automática:
+// - al ocultar/minimizar la app: sube de inmediato cualquier guardado pendiente
+// - al volver a la app: trae en silencio lo último de la nube (por si el tiempo real se perdió)
 document.addEventListener('visibilitychange', ()=>{
   if(document.visibilityState==='hidden' && cloud.user && cloud.pushTimer){ clearTimeout(cloud.pushTimer); cloud.pushTimer=null; cloud.push(true); }
+  if(document.visibilityState==='visible' && cloud.user && cloud.status!=='sync'){ cloud.pull(true); }
 });
 </script>
 </body>
