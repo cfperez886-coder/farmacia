@@ -558,7 +558,7 @@ function navBtnMobile(n){
   return `<button onclick="go('${n.id}')" class="flex flex-col items-center justify-center gap-0.5 py-2 text-[9px] ${active?'text-brand-700':'text-slate-400'}"><span class="text-base leading-none">${n.icon}</span><span class="truncate max-w-full">${n.label}</span></button>`;
 }
 
-function go(r){ route=r; location.hash=r; modal=null; render(); window.scrollTo(0,0); }
+function go(r){ route=r; location.hash=r; modal=null; clearScanConsumer(); render(); window.scrollTo(0,0); }
 window.addEventListener('hashchange',()=>{ const r=location.hash.replace('#',''); if(r&&r!==route){route=r; render();} });
 
 /* ============================================================
@@ -924,7 +924,7 @@ function openModal(title, bodyHtml, size='md'){
   modal = { title, bodyHtml, size };
   renderModal();
 }
-function closeModal(){ modal=null; const m=$('#modal'); if(m) m.remove(); }
+function closeModal(){ modal=null; clearScanConsumer(); const m=$('#modal'); if(m) m.remove(); }
 function renderModal(){
   const old=$('#modal'); if(old) old.remove();
   const w = {sm:'max-w-sm',md:'max-w-lg',lg:'max-w-2xl'}[modal.size]||'max-w-lg';
@@ -1055,7 +1055,7 @@ function openProducto(id){
           </label>
           ${field('Categoría',`<input name="categoria" value="${esc(p.categoria||'')}" class="${inputCls}" placeholder="Ej: Medicamento">`)}</div>
       </div>
-      ${field('Código / SKU',`<input name="codigo" value="${esc(p.codigo||'')}" class="${inputCls}" placeholder="Código de barras (opcional)">`)}
+      ${field('Código / SKU <span class="text-slate-300 font-normal">— 🖥️ escanéalo aquí con un lector USB</span>',`<input id="prodCodigo" name="codigo" value="${esc(p.codigo||'')}" class="${inputCls}" placeholder="Código de barras (opcional)">`)}
       <div class="grid grid-cols-3 gap-2">
         ${field('P. compra',`<input name="precioCompra" type="number" min="0" step="any" value="${p.precioCompra||''}" class="${inputCls}">`)}
         ${field('P. venta *',`<input name="precioVenta" type="number" min="0" step="any" required value="${p.precioVenta||''}" class="${inputCls}">`)}
@@ -1091,11 +1091,104 @@ function ajustarStock(id){
   store.save(); openProducto(id); render(); toast('Stock ajustado');
 }
 
+/* ============================================================
+   LECTOR DE CÓDIGO DE BARRAS
+   Dos modos:
+   1) Lector USB (escritorio): funciona como un teclado — escribe
+      los dígitos muy rápido y termina con Enter. Lo detectamos por
+      la velocidad (ráfaga) + Enter, sin librerías ni permisos.
+   2) Cámara (celular): usa la API nativa BarcodeDetector.
+   El código escaneado se busca en el campo `codigo` del producto.
+   ============================================================ */
+const getProductoPorCodigo = code => {
+  const c = String(code||'').trim(); if(!c) return null;
+  return DB.productos.find(p => (p.codigo||'').trim() === c) || null;
+};
+let scanConsumer = null; // función(code) activa según el contexto (p.ej. venta abierta)
+function setScanConsumer(fn){ scanConsumer = fn; }
+function clearScanConsumer(){ scanConsumer = null; }
+
+// --- Lector USB (keyboard-wedge) ---
+(function initWedge(){
+  let buf='', last=0;
+  document.addEventListener('keydown', function(e){
+    if(e.key === 'Enter'){
+      if(/^\d{6,}$/.test(buf)){ const code=buf; buf=''; onWedgeScan(code, e); }
+      else buf='';
+      return;
+    }
+    if(e.key && e.key.length === 1){
+      const now = Date.now();
+      if(now - last > 60) buf = '';   // si viene lento es tecleo humano, no un escáner
+      buf += e.key; last = now;
+    }
+  }, true);
+})();
+function onWedgeScan(code, e){
+  if(scanConsumer){ if(e) e.preventDefault(); return scanConsumer(code); }
+  const el = document.getElementById('prodCodigo');       // formulario de producto abierto
+  if(el){ if(e) e.preventDefault(); el.value = code; toast('Código capturado ✓'); return; }
+  if(!modal){                                             // desde cualquier pantalla sin modal: inicia una venta
+    const p = getProductoPorCodigo(code);
+    if(p && stockDe(p) > 0){ if(e) e.preventDefault(); openVenta(); ventaScan(code); }
+    else if(p){ toast(p.nombre + ': sin stock', 'err'); }
+    else { toast('Código ' + code + ' no está en tu inventario', 'err'); }
+  }
+}
+
+// --- Cámara (BarcodeDetector) ---
+let camStream=null, camRAF=null, camCancelCb=null;
+async function openCamScan(onCode, onCancel){
+  if(!('BarcodeDetector' in window) || !(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)){
+    toast('La cámara no está disponible en este navegador. Usa un lector USB o escribe el código.', 'err');
+    if(onCancel) onCancel(); return;
+  }
+  camCancelCb = onCancel || null;
+  openModal('📷 Escanear código', `
+    <div>
+      <div class="rounded-2xl overflow-hidden bg-black relative" style="aspect-ratio:4/3">
+        <video id="camVid" playsinline muted autoplay style="width:100%;height:100%;object-fit:cover"></video>
+        <div class="absolute inset-x-8 top-1/2 -translate-y-1/2 h-24 border-2 border-white/80 rounded-xl"></div>
+      </div>
+      <p class="text-xs text-slate-400 text-center mt-2">Apunta la cámara al código de barras del producto.</p>
+      <button type="button" onclick="closeCamScan(true)" class="mt-3 w-full border border-slate-200 rounded-xl py-2.5 text-sm hover:bg-slate-50">Cancelar</button>
+    </div>`, 'sm');
+  try{
+    const det = new BarcodeDetector();
+    camStream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:'environment' } });
+    const vid = document.getElementById('camVid'); if(!vid){ closeCamScan(false); return; }
+    vid.srcObject = camStream; await vid.play();
+    const tick = async ()=>{
+      if(!camStream) return;
+      try{ const found = await det.detect(vid); if(found && found.length){ const code=found[0].rawValue; closeCamScan(false); if(onCode) onCode(code); return; } }catch(_){}
+      camRAF = requestAnimationFrame(tick);
+    };
+    camRAF = requestAnimationFrame(tick);
+  }catch(err){ console.error(err); closeCamScan(false); toast('No se pudo abrir la cámara (¿permiso denegado?)', 'err'); if(onCancel) onCancel(); }
+}
+function closeCamScan(cancelled){
+  if(camRAF){ cancelAnimationFrame(camRAF); camRAF=null; }
+  if(camStream){ camStream.getTracks().forEach(t=>t.stop()); camStream=null; }
+  const cb = camCancelCb; camCancelCb=null;
+  closeModal();
+  if(cancelled && cb) cb();
+}
+
 /* ----- Venta ----- */
 let carritoV=[];
-function openVenta(){
-  carritoV=[];
-  openModal('Nueva venta', ventaBody(), 'lg');
+function openVenta(){ carritoV=[]; showVenta(); }
+function showVenta(){ openModal('Nueva venta', ventaBody(), 'lg'); setScanConsumer(ventaScan); }
+// Agrega al carrito el producto cuyo código de barras se escaneó
+function ventaScan(code){
+  const p = getProductoPorCodigo(code);
+  if(!p) return toast('Código ' + code + ' no está en tu inventario', 'err');
+  if(stockDe(p) <= 0) return toast(p.nombre + ': sin stock', 'err');
+  const ya = carritoV.filter(i=>i.prodId===p.id).reduce((s,i)=>s+i.cant,0);
+  if(ya + 1 > stockDe(p)) return toast('Solo hay ' + stockDe(p) + ' de ' + p.nombre, 'err');
+  const ex = carritoV.find(i=>i.prodId===p.id && i.precio===p.precioVenta);
+  if(ex) ex.cant += 1; else carritoV.push({ prodId:p.id, cant:1, precio:p.precioVenta, costo:p.precioCompra||0 });
+  if($('#modal')) refreshVenta(); else showVenta();
+  toast('✓ ' + p.nombre);
 }
 function ventaBody(){
   const total=carritoV.reduce((s,i)=>s+i.cant*i.precio,0);
@@ -1113,6 +1206,8 @@ function ventaBody(){
       </div></div>`;
   }
   return `
+    <button type="button" onclick="openCamScan(ventaScan, showVenta)" class="w-full mb-2 border border-brand text-brand-700 font-semibold rounded-xl py-2 hover:bg-brand-50 flex items-center justify-center gap-2">📷 Escanear código de barras</button>
+    <p class="text-[11px] text-slate-400 text-center mb-2 -mt-1">📱 con la cámara del celular · 🖥️ o con un lector USB (se agrega solo al escanear)</p>
     <div class="flex gap-2 mb-1">
       <select id="vProd" onchange="onProdVentaChange()" class="${inputCls} flex-1"><option value="">Agregar producto…</option>${opts}</select>
       <input id="vCant" type="number" min="1" value="1" class="${inputCls} w-16" title="Cantidad">
