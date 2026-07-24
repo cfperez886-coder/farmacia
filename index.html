@@ -543,9 +543,13 @@ const NAV = [
   { id:'compras', label:'Compras', icon:'🛒' },
   { id:'inventario', label:'Inventario', icon:'📦' },
   { id:'clientes', label:'Clientes', icon:'👥' },
+  { id:'proveedores', label:'Proveedores', icon:'🚚' },
   { id:'vencimientos', label:'Vencimientos', icon:'⏰' },
   { id:'reportes', label:'Reportes', icon:'📊' },
 ];
+// En móvil la barra inferior muestra solo estos 5; el resto va en "Más ⋯"
+const NAV_MOBILE = ['dashboard','ventas','inventario','clientes'];
+const NAV_MAS = ['compras','proveedores','vencimientos','reportes'];
 
 // Créditos con fecha límite a 5 días o menos (o ya vencida):
 // - 'cobrar': clientes con saldo pendiente por cobrar
@@ -610,9 +614,10 @@ function render(){
       <div id="view" tabindex="-1" class="max-w-5xl mx-auto p-4 md:p-6 fade outline-none"></div>
     </main>
 
-    <!-- Bottom nav (mobile) -->
-    <nav class="md:hidden fixed bottom-0 inset-x-0 z-20 bg-white border-t border-slate-100 grid grid-cols-7 px-0.5 pb-[env(safe-area-inset-bottom)]">
-      ${NAV.map(n=>navBtnMobile(n)).join('')}
+    <!-- Bottom nav (mobile): 5 destinos + Más -->
+    <nav class="md:hidden fixed bottom-0 inset-x-0 z-20 bg-white border-t border-slate-100 grid grid-cols-5 px-0.5 pb-[env(safe-area-inset-bottom)]">
+      ${NAV_MOBILE.map(id=>navBtnMobile(NAV.find(n=>n.id===id))).join('')}
+      ${navBtnMas()}
     </nav>
   </div>`;
   renderView();
@@ -627,7 +632,25 @@ function navBtn(n){
 }
 function navBtnMobile(n){
   const active = route===n.id;
-  return `<button onclick="go('${n.id}')" class="flex flex-col items-center justify-center gap-0.5 py-2 text-[9px] ${active?'text-brand-700':'text-slate-400'}"><span class="text-base leading-none">${n.icon}</span><span class="truncate max-w-full">${n.label}</span></button>`;
+  return `<button onclick="go('${n.id}')" class="flex flex-col items-center justify-center gap-0.5 py-2 text-[10px] ${active?'text-brand-700 font-semibold':'text-slate-500'}"><span class="text-lg leading-none">${n.icon}</span><span class="truncate max-w-full">${n.label}</span></button>`;
+}
+function navBtnMas(){
+  const active = NAV_MAS.includes(route);
+  const badge = alertsCount()>0 ? `<span class="absolute top-1 right-2 min-w-[16px] h-4 px-1 grid place-items-center text-[9px] font-bold bg-rose-500 text-white rounded-full">${alertsCount()}</span>` : '';
+  return `<button onclick="openMas()" class="relative flex flex-col items-center justify-center gap-0.5 py-2 text-[10px] ${active?'text-brand-700 font-semibold':'text-slate-500'}"><span class="text-lg leading-none">⋯</span><span>Más</span>${badge}</button>`;
+}
+// Hoja "Más": destinos secundarios + accesos de cuenta/ajustes/tema (que en móvil viven en el header)
+function openMas(){
+  const dest=(id,label)=>{ const n=NAV.find(x=>x.id===id); const b= id==='vencimientos'&&alertsCount()>0?`<span class="ml-auto text-[11px] bg-rose-500 text-white rounded-full px-2 py-0.5 font-semibold">${alertsCount()}</span>`:''; return `<button onclick="closeModal();go('${id}')" class="w-full flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-slate-50 text-left"><span class="text-xl w-6 text-center">${n.icon}</span><span class="font-medium">${label||n.label}</span>${b}</button>`; };
+  const util=(icon,label,fn)=>`<button onclick="closeModal();${fn}" class="w-full flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-slate-50 text-left"><span class="text-xl w-6 text-center">${icon}</span><span class="font-medium">${label}</span></button>`;
+  openModal('Más opciones',
+    `<div class="space-y-1">${NAV_MAS.map(id=>dest(id)).join('')}</div>
+     <div class="border-t border-slate-100 my-2"></div>
+     <div class="space-y-1">
+       ${util('☁️','Conectar nube','openCuenta()')}
+       ${util(getTheme()==='dark'?'☀️':'🌙', getTheme()==='dark'?'Tema claro':'Tema oscuro','toggleTheme()')}
+       ${util('⚙️','Ajustes','openConfig()')}
+     </div>`, 'sm');
 }
 
 function go(r){ route=r; location.hash=r; modal=null; render(); window.scrollTo(0,0); }
@@ -638,7 +661,7 @@ window.addEventListener('hashchange',()=>{ const r=location.hash.replace('#','')
    ============================================================ */
 function renderView(){
   const v = $('#view');
-  const views = { dashboard:viewDashboard, ventas:viewVentas, compras:viewCompras, inventario:viewInventario, clientes:viewClientes, vencimientos:viewVencimientos, reportes:viewReportes, gastos:viewGastos };
+  const views = { dashboard:viewDashboard, ventas:viewVentas, compras:viewCompras, inventario:viewInventario, clientes:viewClientes, proveedores:viewProveedores, vencimientos:viewVencimientos, reportes:viewReportes, gastos:viewGastos };
   v.innerHTML = (views[route]||viewDashboard)();
   // Re-aplicar filtros activos (búsqueda + fechas) tras cada re-render,
   // para que la lista siempre coincida con lo que muestran las cajas de filtro.
@@ -786,7 +809,7 @@ function viewDashboard(){
   DB.productos.forEach(p=>(p.lotes||[]).forEach(l=>{ const d=daysUntil(l.venc); if(l.venc && d!==null && d<=DB.config.alertaVencimiento) porVencer.push({p,l,d}); }));
   porVencer.sort((a,b)=>a.d-b.d);
 
-  const kpi = (icon,label,val,sub,color)=>`<div class="card p-4 relative overflow-hidden"><span class="absolute -right-1 -top-1 text-4xl opacity-10 select-none">${icon}</span><div class="text-xs text-slate-400 font-medium">${label}</div><div class="text-2xl font-bold mt-1 ${color||''}">${val}</div>${sub?`<div class="text-xs text-slate-400 mt-0.5">${sub}</div>`:''}</div>`;
+  const kpi = (label,val,sub,color)=>`<div class="card p-4"><div class="text-xs text-slate-400 font-medium">${label}</div><div class="text-2xl font-bold mt-1 ${color||''}">${val}</div>${sub?`<div class="text-xs text-slate-400 mt-0.5">${sub}</div>`:''}</div>`;
 
   const creditos = creditosPorVencer();
   const notifCreditos = creditos.length ? `
@@ -805,10 +828,10 @@ function viewDashboard(){
       btnGhost('🧾 Cierre','openCierre()') + btnPrimary('+ Nueva venta','openVenta()'))
     + notifCreditos
     + `<div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
-        ${kpi('💵','Ventas de hoy', fmtMoney(totalHoy), `${ventasHoy.length} venta(s)`,'text-teal-600')}
-        ${kpi('📅','Ventas del mes', fmtMoney(totalMes), `Ganancia: ${fmtMoney(gananciaMes)}`)}
-        ${kpi('🤝','Por cobrar (crédito)', fmtMoney(fiadoTotal), `${DB.clientes.filter(c=>c.saldo>0).length} cliente(s)`,'text-amber-600')}
-        ${kpi('📦','Valor inventario', fmtMoney(valorInv), `${DB.productos.length} producto(s)`)}
+        ${kpi('Ventas de hoy', fmtMoney(totalHoy), `${ventasHoy.length} venta(s)`,'text-teal-600')}
+        ${kpi('Ventas del mes', fmtMoney(totalMes), `Ganancia: ${fmtMoney(gananciaMes)}`)}
+        ${kpi('Por cobrar (crédito)', fmtMoney(fiadoTotal), `${DB.clientes.filter(c=>c.saldo>0).length} cliente(s)`,'text-amber-600')}
+        ${kpi('Valor inventario', fmtMoney(valorInv), `${DB.productos.length} producto(s)`)}
       </div>
       <div class="grid md:grid-cols-2 gap-4">
         <div class="card p-4">
@@ -861,6 +884,9 @@ function invFiltroBar(){
     ${(invFiltro.desde||invFiltro.hasta)?`<button onclick="invFiltro={desde:'',hasta:''};renderView()" class="text-xs text-rose-500 border border-rose-200 rounded-lg px-3 py-2.5 h-fit">Limpiar fechas</button>`:''}
   </div>`;
 }
+// Botones de acción de la tabla de inventario: ícono + etiqueta clara + área tocable cómoda
+const btnEditarProd = pid => `<button onclick="openProducto('${pid}')" title="Editar datos del producto" class="inline-flex items-center gap-1 text-xs font-medium text-brand-700 px-2.5 py-2 rounded-lg hover:bg-brand-50">✏️ Editar</button>`;
+const btnAjustarLote = (pid,lid) => `<button onclick="openLote('${pid}','${lid}')" title="Ajustar stock del lote" class="inline-flex items-center gap-1 text-xs font-medium text-teal-700 px-2.5 py-2 rounded-lg hover:bg-teal-50">📦 Ajustar</button>`;
 function viewInventario(){
   const filtroActivo = !!(invFiltro.desde||invFiltro.hasta);
   const ps = DB.productos.slice().sort((a,b)=>a.nombre.localeCompare(b.nombre));
@@ -889,7 +915,7 @@ function viewInventario(){
         <td class="p-3 text-right whitespace-nowrap">${fmtMoney(p.precioVenta)}</td>
         <td class="p-3 text-center"><span class="font-semibold ${bajo?(st===0?'text-rose-600':'text-amber-600'):''}">${st}</span> <span class="text-xs text-slate-400">${esc(p.unidad||'u')}</span></td>
         <td class="p-3 text-center text-xs ${prox&&daysUntil(prox)<=DB.config.alertaVencimiento?'text-amber-600 font-medium':'text-slate-400'}">${prox?fmtDate(prox):'—'}</td>
-        <td class="p-3 text-right whitespace-nowrap"><button onclick="openProducto('${p.id}')" class="text-xs text-brand-700 font-medium">Editar</button>${lotes[0]?` <button onclick="openLote('${p.id}','${lotes[0].id}')" class="text-xs text-teal-700 font-medium ml-2">Ajustar stock</button>`:''}</td>
+        <td class="p-2"><div class="flex items-center justify-end gap-1">${btnEditarProd(p.id)}${lotes[0]?btnAjustarLote(p.id,lotes[0].id):''}</div></td>
       </tr>`;
     }
     // Varios lotes: fila del producto (stock total) + una fila por lote, ordenadas por vencimiento
@@ -898,7 +924,7 @@ function viewInventario(){
         <td class="p-3 text-right whitespace-nowrap">${fmtMoney(p.precioVenta)}</td>
         <td class="p-3 text-center"><span class="font-semibold ${bajo?(st===0?'text-rose-600':'text-amber-600'):''}">${st}</span> <span class="text-xs text-slate-400">${esc(p.unidad||'u')} total</span></td>
         <td class="p-3 text-center text-xs text-slate-400">—</td>
-        <td class="p-3 text-right"><button onclick="openProducto('${p.id}')" class="text-xs text-brand-700 font-medium">Editar</button></td>
+        <td class="p-2"><div class="flex justify-end">${btnEditarProd(p.id)}</div></td>
       </tr>`;
     const subFilas = lotes.map(l=>{
       const d = daysUntil(l.venc);
@@ -908,7 +934,7 @@ function viewInventario(){
         <td></td>
         <td class="p-2 text-center text-xs ${urgente?'text-amber-600 font-medium':'text-slate-500'}">${l.cantidad} ${esc(p.unidad||'u')}</td>
         <td class="p-2 text-center text-xs ${d!==null&&d<0?'text-rose-600 font-medium':urgente?'text-amber-600 font-medium':'text-slate-400'}">${l.venc?fmtDate(l.venc):'sin fecha'}${l.lote?` <span class="text-slate-300">· L:${esc(l.lote)}</span>`:''}</td>
-        <td class="p-2 text-right"><button onclick="openLote('${p.id}','${l.id}')" class="text-xs text-teal-700 font-medium">Ajustar</button></td>
+        <td class="p-2"><div class="flex justify-end">${btnAjustarLote(p.id,l.id)}</div></td>
       </tr>`;
     }).join('');
     return header + subFilas;
@@ -939,7 +965,7 @@ function viewVentas(){
 /* ---------- COMPRAS ---------- */
 function viewCompras(){
   const cs = DB.compras.slice().sort((a,b)=> b.fecha<a.fecha?-1: b.fecha>a.fecha?1: b.creado-a.creado);
-  return pageHead('Compras', 'Entradas de mercancía a inventario', btnGhost('🚚 Proveedores','openProveedores()') + btnPrimary('+ Nueva compra','openCompra()'))
+  return pageHead('Compras', 'Entradas de mercancía a inventario', btnPrimary('+ Nueva compra','openCompra()'))
     + (cs.length? searchBar('listCompras','Buscar por proveedor, fecha o producto…') + dateRangeBar('listCompras') + noRes('listCompras') + `<div id="listCompras" class="space-y-2">${cs.map(c=>`
         <div data-search="${sdata((c.proveedor||'')+' '+fmtDate(c.fecha)+' '+c.fecha+' '+c.items.map(i=>getProducto(i.prodId)?.nombre||'').join(' '))}" data-fecha="${c.fecha}" class="card p-4 flex items-center justify-between gap-3">
           <div class="min-w-0">
@@ -1183,25 +1209,24 @@ function abonar(id){
   store.save(); render(); if(modal) openCliente(id); toast('Abono registrado');
 }
 
-/* ----- Proveedores ----- */
-function openProveedores(){
+/* ----- Proveedores (módulo propio, como Clientes) ----- */
+function viewProveedores(){
   const ps = DB.proveedores.slice().sort((a,b)=>a.nombre.localeCompare(b.nombre));
-  openModal('🚚 Proveedores',
-    `<button onclick="openProveedor()" class="w-full bg-brand hover:bg-brand-700 text-white font-semibold py-2.5 rounded-xl mb-3">+ Nuevo proveedor</button>
-     ${ps.length? `<div class="space-y-2 max-h-96 overflow-y-auto">${ps.map(p=>`
-       <div class="card p-3 flex items-start justify-between gap-2">
-         <div class="min-w-0">
-           <div class="font-semibold truncate">${esc(p.nombre)}</div>
-           ${p.negocio?`<div class="text-xs text-slate-500 truncate">🏪 ${esc(p.negocio)}</div>`:''}
-           <div class="text-xs text-slate-400 truncate">${esc(p.telefono||'Sin teléfono')}${p.plazoMeses?` · crédito a ${p.plazoMeses} mes(es)`:''}</div>
-           ${p.saldo>0?`<div class="text-xs mt-1 inline-block bg-rose-50 text-rose-700 px-2 py-0.5 rounded-full font-medium">Le debo: ${fmtMoney(p.saldo)}</div>`:''}
-         </div>
-         <div class="flex flex-col gap-1 shrink-0">
-           <button onclick="openProveedor('${p.id}')" class="text-xs text-brand-700 font-medium px-2 py-1 hover:bg-brand-50 rounded-lg">Editar</button>
-           ${(p.movs&&p.movs.length)?`<button onclick="openEstadoCuentaProv('${p.id}')" class="text-xs text-brand-700 font-medium px-2 py-1 hover:bg-brand-50 rounded-lg">Estado cuenta 📄</button>`:''}
-           ${p.saldo>0?`<button onclick="abonarProv('${p.id}')" class="text-xs text-teal-700 font-medium px-2 py-1 hover:bg-teal-50 rounded-lg">Registrar pago</button>`:''}
-         </div>
-       </div>`).join('')}</div>` : `<p class="text-sm text-slate-400 text-center py-6">Aún no tienes proveedores. Crea el primero.</p>`}`,'lg');
+  return pageHead('Proveedores', `${ps.length} registrado(s)`, btnPrimary('+ Proveedor','openProveedor()'))
+    + (ps.length? searchBar('listProveedores','Buscar por nombre, negocio o teléfono…') + noRes('listProveedores') + `<div id="listProveedores" class="grid sm:grid-cols-2 gap-3">${ps.map(p=>`
+        <div data-search="${sdata(p.nombre+' '+(p.negocio||'')+' '+(p.telefono||''))}" class="card p-4 flex items-start justify-between gap-3">
+          <div class="min-w-0">
+            <div class="font-semibold truncate">${esc(p.nombre)}</div>
+            ${p.negocio?`<div class="text-xs text-slate-500 truncate">🏪 ${esc(p.negocio)}</div>`:''}
+            <div class="text-sm text-slate-400 truncate">${esc(p.telefono||'Sin teléfono')}${p.plazoMeses?` · crédito a ${p.plazoMeses} mes(es)`:''}</div>
+            ${p.saldo>0?`<div class="text-xs mt-1 inline-block bg-rose-50 text-rose-700 px-2 py-0.5 rounded-full font-medium">Le debo: ${fmtMoney(p.saldo)}</div>`:''}
+          </div>
+          <div class="flex flex-col gap-1 shrink-0">
+            <button onclick="openProveedor('${p.id}')" class="text-xs text-brand-700 font-medium px-2 py-1 hover:bg-brand-50 rounded-lg">Editar</button>
+            ${(p.movs&&p.movs.length)?`<button onclick="openEstadoCuentaProv('${p.id}')" class="text-xs text-brand-700 font-medium px-2 py-1 hover:bg-brand-50 rounded-lg">Estado cuenta 📄</button>`:''}
+            ${p.saldo>0?`<button onclick="abonarProv('${p.id}')" class="text-xs text-teal-700 font-medium px-2 py-1 hover:bg-teal-50 rounded-lg">Registrar pago</button>`:''}
+          </div>
+        </div>`).join('')}</div>` : empty('🚚','Aún no tienes proveedores. Agrega el primero.'));
 }
 function openProveedor(id){
   const p = id? getProveedor(id) : {nombre:'',negocio:'',telefono:'',email:'',direccion:'',notas:'',saldo:0,plazoMeses:1};
@@ -1224,14 +1249,14 @@ function saveProveedor(e,id){
   e.preventDefault(); const f=e.target;
   const obj={ nombre:f.nombre.value.trim(), negocio:f.negocio.value.trim(), telefono:f.telefono.value.trim(), email:f.email.value.trim(), direccion:f.direccion.value.trim(), notas:f.notas.value.trim(), plazoMeses:Math.max(1,+f.plazoMeses.value||1) };
   if(id){ Object.assign(getProveedor(id),obj); } else { DB.proveedores.push({id:uid(),saldo:0,movs:[],...obj}); }
-  store.save(); openProveedores(); render(); toast('Proveedor guardado');
+  store.save(); closeModal(); render(); toast('Proveedor guardado');
   return false;
 }
 function delProveedor(id){
   const p=getProveedor(id);
   if(p && p.saldo>0 && !confirm(`Le debes ${fmtMoney(p.saldo)} a este proveedor. ¿Eliminarlo de todas formas?`)) return;
   if(!(p&&p.saldo>0) && !confirm('¿Eliminar este proveedor?')) return;
-  DB.proveedores=DB.proveedores.filter(x=>x.id!==id); store.save(); openProveedores(); render(); toast('Proveedor eliminado');
+  DB.proveedores=DB.proveedores.filter(x=>x.id!==id); store.save(); closeModal(); render(); toast('Proveedor eliminado');
 }
 let abonoSoporteTmp = {name:'',tipo:'',data:''};
 function onAbonoSoporte(input){ leerAdjunto(input, obj=>{ abonoSoporteTmp=obj; const a=document.getElementById('abSoporteArea'); if(a) a.innerHTML=adjuntoAreaInner(abonoSoporteTmp,'soporte de pago','quitarAbonoSoporte()','abSoporteFile','onAbonoSoporte(this)'); }); }
@@ -1259,7 +1284,7 @@ function saveAbonoProv(e,id){
   p.saldo=Math.max(0,(p.saldo||0)-n);
   p.movs=p.movs||[]; p.movs.push({fecha:todayISO(),tipo:'abono',monto:n,medioPago,soporte:{...abonoSoporteTmp}});
   abonoSoporteTmp={name:'',tipo:'',data:''};
-  store.save(); render(); openProveedores(); toast('Pago registrado');
+  store.save(); closeModal(); render(); toast('Pago registrado');
   return false;
 }
 function estadoCuentaProvTexto(p){
@@ -1404,7 +1429,7 @@ function ventaBody(){
       ${field('Plazo de pago (meses)',`<input id="vPlazo" type="number" min="1" step="1" value="1" oninput="actualizarPlazoInfo()" class="${inputCls}">`)}
       <p id="vPlazoInfo" class="text-[11px] text-slate-400 -mt-2"></p>
     </div>
-    <button type="button" onclick="confirmVenta()" ${carritoV.length?'':'disabled'} class="w-full bg-teal-600 disabled:opacity-40 hover:bg-teal-700 text-white font-semibold py-3 rounded-xl">Registrar venta · ${fmtMoney(total)}</button>`;
+    <button type="button" onclick="confirmVenta()" ${carritoV.length?'':'disabled'} class="w-full bg-teal-600 disabled:bg-slate-200 disabled:text-slate-500 disabled:cursor-not-allowed hover:bg-teal-700 text-white font-semibold py-3 rounded-xl">Registrar venta · ${fmtMoney(total)}</button>`;
 }
 function refreshVenta(){ const b=$('#modal .p-5'); if(b) b.innerHTML=ventaBody(); }
 // Suma meses a una fecha ISO (para la fecha límite del crédito)
@@ -1668,7 +1693,7 @@ function compraBody(){
   const total=carritoC.reduce((s,i)=>s+i.cant*i.costo,0);
   const provOpts=DB.proveedores.slice().sort((a,b)=>a.nombre.localeCompare(b.nombre)).map(p=>`<option value="${p.id}">${esc(p.nombre)}${p.negocio?` — ${esc(p.negocio)}`:''}</option>`).join('');
   return `
-    ${field('Proveedor <span class="text-slate-300 font-normal">— créalos con el botón 🚚 Proveedores en Compras</span>',`<select id="cProvId" onchange="onCompraProv()" class="${inputCls}"><option value="">Sin proveedor / otro</option>${provOpts}</select>`)}
+    ${field('Proveedor <span class="text-slate-300 font-normal">— créalos en el módulo Proveedores</span>',`<select id="cProvId" onchange="onCompraProv()" class="${inputCls}"><option value="">Sin proveedor / otro</option>${provOpts}</select>`)}
     ${field('N° de factura / recibo',`<input id="cFactura" class="${inputCls}" placeholder="Ej: FE-00123">`)}
     <label class="block mb-3"><span class="text-xs font-medium text-slate-500">Adjuntar factura (imagen o PDF)</span>
       <div id="cFacturaArea" class="mt-1">${adjuntoAreaInner(compraFacturaTmp,'factura','quitarCompraFactura()','cFacturaFile','onCompraFactura(this)')}</div>
@@ -1705,7 +1730,7 @@ function compraBody(){
     <div id="cMedioPagoWrap" class="mb-4">
       ${field('Medio de pago',`<select id="cMedioPago" class="${inputCls}">${MEDIOS_PAGO.map(m=>`<option value="${m}">${m}</option>`).join('')}</select>`)}
     </div>
-    <button type="button" onclick="confirmCompra()" ${carritoC.length?'':'disabled'} class="w-full bg-brand disabled:opacity-40 hover:bg-brand-700 text-white font-semibold py-3 rounded-xl">Registrar compra · ${fmtMoney(total)}</button>`;
+    <button type="button" onclick="confirmCompra()" ${carritoC.length?'':'disabled'} class="w-full bg-brand disabled:bg-slate-200 disabled:text-slate-500 disabled:cursor-not-allowed hover:bg-brand-700 text-white font-semibold py-3 rounded-xl">Registrar compra · ${fmtMoney(total)}</button>`;
 }
 function refreshCompra(){
   const provId=$('#cProvId')?.value, cred=$('#cCredito')?.checked, plazo=$('#cPlazo')?.value, factura=$('#cFactura')?.value, medioPago=$('#cMedioPago')?.value;
