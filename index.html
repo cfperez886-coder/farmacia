@@ -678,6 +678,24 @@ function onFoto(input){
 }
 function quitarFoto(){ fotoTmp=''; const area=document.getElementById('fotoArea'); if(area) area.innerHTML=fotoAreaInner(); }
 
+/* ---------- Adjuntos genéricos (facturas, soportes de pago) — sin recomprimir, admite PDF/imagen ---------- */
+function leerAdjunto(input, cb){
+  const f = input.files && input.files[0]; if(!f) return;
+  const okTipo = f.type.startsWith('image/') || f.type==='application/pdf';
+  if(!okTipo) return toast('Solo se admiten imágenes o PDF','err');
+  if(f.size > 6*1024*1024) return toast('El archivo es muy pesado (máx. 6MB)','err');
+  const reader = new FileReader();
+  reader.onload = () => cb({ name:f.name, tipo:f.type, data:reader.result });
+  reader.readAsDataURL(f);
+}
+function adjuntoAreaInner(obj, tipoLabel, onQuitar, inputId, onChange){
+  return obj && obj.data
+    ? `<div class="flex items-center gap-2 bg-slate-50 rounded-xl px-3 py-2 text-sm"><span class="flex-1 truncate">📎 ${esc(obj.name||tipoLabel)}</span>
+        ${obj.tipo && obj.tipo.startsWith('image/') ? `<a href="${obj.data}" target="_blank" class="text-brand-700 text-xs font-medium">Ver</a>` : `<a href="${obj.data}" download="${esc(obj.name||'archivo.pdf')}" class="text-brand-700 text-xs font-medium">Ver</a>`}
+        <button type="button" onclick="${onQuitar}" class="text-rose-500 text-lg leading-none px-1">×</button></div>`
+    : `<label class="flex items-center justify-center gap-2 border-2 border-dashed border-slate-200 rounded-xl py-3 cursor-pointer text-slate-400 hover:border-brand hover:text-brand text-xs"><input type="file" id="${inputId}" accept="image/*,application/pdf" class="hidden" onchange="${onChange}">📎 Adjuntar ${tipoLabel}</label>`;
+}
+
 /* ---------- Autocompletado del catálogo en el formulario de producto ---------- */
 let catMatches = [];
 function catFilter(){
@@ -1142,13 +1160,34 @@ function delProveedor(id){
   if(!(p&&p.saldo>0) && !confirm('¿Eliminar este proveedor?')) return;
   DB.proveedores=DB.proveedores.filter(x=>x.id!==id); store.save(); openProveedores(); render(); toast('Proveedor eliminado');
 }
+let abonoSoporteTmp = {name:'',tipo:'',data:''};
+function onAbonoSoporte(input){ leerAdjunto(input, obj=>{ abonoSoporteTmp=obj; const a=document.getElementById('abSoporteArea'); if(a) a.innerHTML=adjuntoAreaInner(abonoSoporteTmp,'soporte de pago','quitarAbonoSoporte()','abSoporteFile','onAbonoSoporte(this)'); }); }
+function quitarAbonoSoporte(){ abonoSoporteTmp={name:'',tipo:'',data:''}; const a=document.getElementById('abSoporteArea'); if(a) a.innerHTML=adjuntoAreaInner(abonoSoporteTmp,'soporte de pago','quitarAbonoSoporte()','abSoporteFile','onAbonoSoporte(this)'); }
 function abonarProv(id){
-  const p=getProveedor(id);
-  const val=prompt(`Le debes ${fmtMoney(p.saldo)} a ${p.nombre}.\n¿Cuánto le pagas?`, p.saldo);
-  if(val===null) return; const n=+val; if(isNaN(n)||n<=0) return toast('Monto inválido','err');
+  const p=getProveedor(id); if(!p) return;
+  abonoSoporteTmp={name:'',tipo:'',data:''};
+  openModal('💵 Registrar pago a proveedor',
+    `<div class="mb-3 text-sm text-slate-500">Le debes <b class="text-rose-600">${fmtMoney(p.saldo)}</b> a <b>${esc(p.nombre)}</b>.</div>
+     <form onsubmit="return saveAbonoProv(event,'${id}')">
+      ${field('Monto a pagar *',`<input name="monto" type="number" min="1" step="any" required value="${p.saldo}" class="${inputCls}">`)}
+      ${field('Medio de pago',`<select name="medioPago" class="${inputCls}">${MEDIOS_PAGO.map(m=>`<option value="${m}">${m}</option>`).join('')}</select>`)}
+      <label class="block mb-3"><span class="text-xs font-medium text-slate-500">Soporte de pago (comprobante) *</span>
+        <div id="abSoporteArea" class="mt-1">${adjuntoAreaInner(abonoSoporteTmp,'soporte de pago','quitarAbonoSoporte()','abSoporteFile','onAbonoSoporte(this)')}</div>
+      </label>
+      <button type="submit" class="w-full bg-brand hover:bg-brand-700 text-white font-semibold py-2.5 rounded-xl">Registrar pago</button>
+     </form>`);
+}
+function saveAbonoProv(e,id){
+  e.preventDefault(); const f=e.target;
+  const p=getProveedor(id); if(!p) return false;
+  const n=+f.monto.value; if(isNaN(n)||n<=0){ toast('Monto inválido','err'); return false; }
+  if(!abonoSoporteTmp.data){ toast('Adjunta el soporte de pago antes de registrar','err'); return false; }
+  const medioPago=f.medioPago.value;
   p.saldo=Math.max(0,(p.saldo||0)-n);
-  p.movs=p.movs||[]; p.movs.push({fecha:todayISO(),tipo:'abono',monto:n});
+  p.movs=p.movs||[]; p.movs.push({fecha:todayISO(),tipo:'abono',monto:n,medioPago,soporte:{...abonoSoporteTmp}});
+  abonoSoporteTmp={name:'',tipo:'',data:''};
   store.save(); render(); openProveedores(); toast('Pago registrado');
+  return false;
 }
 function estadoCuentaProvTexto(p){
   const movs=(p.movs||[]).slice().sort((a,b)=> a.fecha<b.fecha?-1: a.fecha>b.fecha?1: 0);
@@ -1181,8 +1220,13 @@ function openEstadoCuentaProv(id){
             ${prods?`<div class="text-xs text-slate-400 mt-0.5">${prods}</div>`:''}
           </div>`;
         }
-        const label = m.tipo==='abono' ? 'Pago realizado' : 'Compra anulada';
-        return `<div class="flex justify-between text-sm border-b border-slate-100 pb-2"><span>${fmtDate(m.fecha)} · ${label}</span><span class="font-semibold text-teal-600">−${fmtMoney(m.monto)}</span></div>`;
+        if(m.tipo==='abono'){
+          return `<div class="border-b border-slate-100 pb-2">
+            <div class="flex justify-between text-sm"><span>${fmtDate(m.fecha)} · Pago realizado${m.medioPago?` <span class="text-xs text-slate-400 font-normal">· ${esc(m.medioPago)}</span>`:''}</span><span class="font-semibold text-teal-600">−${fmtMoney(m.monto)}</span></div>
+            ${m.soporte&&m.soporte.data?`<div class="mt-0.5">${m.soporte.tipo&&m.soporte.tipo.startsWith('image/')?`<a href="${m.soporte.data}" target="_blank" class="text-xs text-brand-700 font-medium">📎 Ver soporte</a>`:`<a href="${m.soporte.data}" download="${esc(m.soporte.name||'soporte.pdf')}" class="text-xs text-brand-700 font-medium">📎 Descargar soporte</a>`}</div>`:''}
+          </div>`;
+        }
+        return `<div class="flex justify-between text-sm border-b border-slate-100 pb-2"><span>${fmtDate(m.fecha)} · Compra anulada</span><span class="font-semibold text-teal-600">−${fmtMoney(m.monto)}</span></div>`;
       }).join('')}</div>` : `<p class="text-sm text-slate-400 text-center py-6">Sin movimientos registrados.</p>`}
      <div class="flex justify-between items-center text-lg font-bold border-t border-slate-100 pt-3 mb-4"><span>Saldo por pagar</span><span class="${p.saldo>0?'text-rose-600':'text-teal-600'}">${fmtMoney(p.saldo)}</span></div>
      ${p.saldo>0?`<button onclick="abonarProv('${id}')" class="w-full mb-2 border border-teal-200 text-teal-700 font-semibold py-2.5 rounded-xl hover:bg-teal-50">💵 Registrar un pago</button>`:''}
@@ -1516,7 +1560,7 @@ function printCierre(desde,hasta){
 
 /* ----- Compra ----- */
 let carritoC=[];
-function openCompra(){ carritoC=[]; openModal('Nueva compra', compraBody(), 'lg'); }
+function openCompra(){ carritoC=[]; compraFacturaTmp={name:'',tipo:'',data:''}; openModal('Nueva compra', compraBody(), 'lg'); }
 function compraProductosDisponibles(){
   const enCatalogo = new Set(CATALOGO.map(s=>s.toLowerCase()));
   const extra = DB.productos.map(p=>p.nombre).filter(n=>!enCatalogo.has(n.toLowerCase()));
@@ -1543,11 +1587,19 @@ function compProdPick(i){
   const drop = document.getElementById('cProdDrop'); if(drop) drop.classList.add('hidden');
 }
 function compProdBlur(){ setTimeout(()=>{ const d=document.getElementById('cProdDrop'); if(d) d.classList.add('hidden'); }, 150); }
+let compraFacturaTmp = {name:'',tipo:'',data:''};
+function onCompraFactura(input){ leerAdjunto(input, obj=>{ compraFacturaTmp=obj; const a=document.getElementById('cFacturaArea'); if(a) a.innerHTML=adjuntoAreaInner(compraFacturaTmp,'factura','quitarCompraFactura()','cFacturaFile','onCompraFactura(this)'); }); }
+function quitarCompraFactura(){ compraFacturaTmp={name:'',tipo:'',data:''}; const a=document.getElementById('cFacturaArea'); if(a) a.innerHTML=adjuntoAreaInner(compraFacturaTmp,'factura','quitarCompraFactura()','cFacturaFile','onCompraFactura(this)'); }
+const MEDIOS_PAGO = ['Efectivo','Transferencia','Tarjeta','Cheque','Otro'];
 function compraBody(){
   const total=carritoC.reduce((s,i)=>s+i.cant*i.costo,0);
   const provOpts=DB.proveedores.slice().sort((a,b)=>a.nombre.localeCompare(b.nombre)).map(p=>`<option value="${p.id}">${esc(p.nombre)}${p.negocio?` — ${esc(p.negocio)}`:''}</option>`).join('');
   return `
     ${field('Proveedor <span class="text-slate-300 font-normal">— créalos con el botón 🚚 Proveedores en Compras</span>',`<select id="cProvId" onchange="onCompraProv()" class="${inputCls}"><option value="">Sin proveedor / otro</option>${provOpts}</select>`)}
+    ${field('N° de factura / recibo',`<input id="cFactura" class="${inputCls}" placeholder="Ej: FE-00123">`)}
+    <label class="block mb-3"><span class="text-xs font-medium text-slate-500">Adjuntar factura (imagen o PDF)</span>
+      <div id="cFacturaArea" class="mt-1">${adjuntoAreaInner(compraFacturaTmp,'factura','quitarCompraFactura()','cFacturaFile','onCompraFactura(this)')}</div>
+    </label>
     <div class="border-t border-slate-100 my-3"></div>
     <label class="block mb-2">
       <span class="text-xs font-medium text-slate-500">Medicamento — busca en el catálogo o escribe uno nuevo</span>
@@ -1577,18 +1629,24 @@ function compraBody(){
       ${field('Plazo de pago (meses)',`<input id="cPlazo" type="number" min="1" step="1" value="1" oninput="actualizarPlazoInfoC()" class="${inputCls}">`)}
       <p id="cPlazoInfo" class="text-[11px] text-slate-400 -mt-2"></p>
     </div>
+    <div id="cMedioPagoWrap" class="mb-4">
+      ${field('Medio de pago',`<select id="cMedioPago" class="${inputCls}">${MEDIOS_PAGO.map(m=>`<option value="${m}">${m}</option>`).join('')}</select>`)}
+    </div>
     <button type="button" onclick="confirmCompra()" ${carritoC.length?'':'disabled'} class="w-full bg-brand disabled:opacity-40 hover:bg-brand-700 text-white font-semibold py-3 rounded-xl">Registrar compra · ${fmtMoney(total)}</button>`;
 }
 function refreshCompra(){
-  const provId=$('#cProvId')?.value, cred=$('#cCredito')?.checked, plazo=$('#cPlazo')?.value;
+  const provId=$('#cProvId')?.value, cred=$('#cCredito')?.checked, plazo=$('#cPlazo')?.value, factura=$('#cFactura')?.value, medioPago=$('#cMedioPago')?.value;
   const b=$('#modal .p-5'); if(!b) return;
   b.innerHTML=compraBody();
   if(provId && $('#cProvId')) $('#cProvId').value=provId;
+  if(factura && $('#cFactura')) $('#cFactura').value=factura;
+  if(medioPago && $('#cMedioPago')) $('#cMedioPago').value=medioPago;
   if(cred && $('#cCredito')){ $('#cCredito').checked=true; onCompraCredito(); if(plazo&&$('#cPlazo')){ $('#cPlazo').value=plazo; actualizarPlazoInfoC(); } }
 }
 function onCompraCredito(){
-  const on=$('#cCredito')?.checked; const w=$('#cPlazoWrap');
+  const on=$('#cCredito')?.checked; const w=$('#cPlazoWrap'); const mp=$('#cMedioPagoWrap');
   if(w) w.classList.toggle('hidden',!on);
+  if(mp) mp.classList.toggle('hidden',on);
   if(on) onCompraProv();
 }
 function onCompraProv(){
@@ -1631,19 +1689,24 @@ function confirmCompra(){
     if(i.costo) p.precioCompra=i.costo;
     return { prodId:p.id, cant:i.cant, costo:i.costo, venc:i.venc, lote:i.lote };
   });
-  const compra={ id:uid(), fecha:todayISO(), creado:Date.now(), proveedor, provId:provId||null, items, total, credito, plazoMeses, venceCredito };
+  const numeroFactura=($('#cFactura')?.value||'').trim();
+  const medioPago=credito?null:($('#cMedioPago')?.value||'Efectivo');
+  const compra={ id:uid(), fecha:todayISO(), creado:Date.now(), proveedor, provId:provId||null, items, total, credito, plazoMeses, venceCredito, numeroFactura, factura:compraFacturaTmp.data?{...compraFacturaTmp}:null, medioPago };
   DB.compras.push(compra);
   if(credito && prov){
     prov.saldo=(prov.saldo||0)+total; prov.movs=prov.movs||[];
     const nombres=items.map(i=>`${getProducto(i.prodId)?.nombre||'(producto)'} x${i.cant}`);
-    prov.movs.push({fecha:todayISO(),tipo:'credito',monto:total,compraId:compra.id,items:nombres,plazoMeses,vence:venceCredito});
+    prov.movs.push({fecha:todayISO(),tipo:'credito',monto:total,compraId:compra.id,items:nombres,plazoMeses,vence:venceCredito,numeroFactura});
   }
+  compraFacturaTmp={name:'',tipo:'',data:''};
   store.save(); closeModal(); render(); toast('Compra registrada ✔');
 }
 function verCompra(id){
   const c=DB.compras.find(x=>x.id===id); if(!c)return;
   openModal('Detalle de compra',
-    `<div class="text-sm text-slate-400 mb-3">${fmtDate(c.fecha)} · ${esc(c.proveedor||'Proveedor')}${c.credito?` · <span class="text-rose-600">Crédito${c.venceCredito?` · pagar antes del ${fmtDate(c.venceCredito)}`:''}</span>`:''}</div>
+    `<div class="text-sm text-slate-400 mb-1">${fmtDate(c.fecha)} · ${esc(c.proveedor||'Proveedor')}${c.credito?` · <span class="text-rose-600">Crédito${c.venceCredito?` · pagar antes del ${fmtDate(c.venceCredito)}`:''}</span>`:` · ${esc(c.medioPago||'Efectivo')}`}</div>
+     ${c.numeroFactura?`<div class="text-sm text-slate-400 mb-1">N° factura: <span class="text-slate-600 font-medium">${esc(c.numeroFactura)}</span></div>`:''}
+     ${c.factura&&c.factura.data?`<div class="mb-3">${c.factura.tipo&&c.factura.tipo.startsWith('image/')?`<a href="${c.factura.data}" target="_blank" class="text-xs text-brand-700 font-medium">📎 Ver factura adjunta</a>`:`<a href="${c.factura.data}" download="${esc(c.factura.name||'factura.pdf')}" class="text-xs text-brand-700 font-medium">📎 Descargar factura adjunta</a>`}</div>`:''}
      <div class="space-y-2 mb-3">${c.items.map(i=>{const p=getProducto(i.prodId);return `<div class="flex justify-between text-sm"><span>${esc(p?.nombre||'(eliminado)')} × ${i.cant}${i.lote?` <span class="text-xs text-slate-400">· Lote ${esc(i.lote)}</span>`:''}${i.venc?` <span class="text-xs text-slate-400">(${fmtDate(i.venc)})</span>`:''}</span><span>${fmtMoney(i.cant*i.costo)}</span></div>`;}).join('')}</div>
      <div class="flex justify-between font-bold border-t border-slate-100 pt-2"><span>Total</span><span>${fmtMoney(c.total)}</span></div>
      <button onclick="delCompra('${id}')" class="mt-4 w-full border border-rose-200 text-rose-600 py-2.5 rounded-xl text-sm">Anular compra (quita stock)</button>`);
