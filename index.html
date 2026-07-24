@@ -1,5 +1,7 @@
+<!DOCTYPE html>
+<html lang="es">
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Mi Negocio — Gestión</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧾</text></svg>">
 <link rel="manifest" href="manifest.json">
@@ -26,6 +28,13 @@
   html.dark ::-webkit-scrollbar-thumb{ background:#475569 }
   .card{ background:#fff; border:1px solid #eef0f4; border-radius:16px; box-shadow:0 1px 3px rgba(15,23,42,.05); transition: background-color .25s, border-color .25s }
   input,select,textarea{ outline:none }
+  /* Accesibilidad AA (1.4.3): slate-400/300 como texto no llegan a 4.5:1 en blanco → se oscurecen.
+     El tema oscuro tiene mayor especificidad (html.dark .text-slate-400) y sigue mandando en dark. */
+  .text-slate-400{ color:#64748b !important } /* 4.76:1 */
+  .text-slate-300{ color:#64748b !important }
+  /* Foco visible reforzado (2.4.7 / 1.4.11) para controles y enlaces */
+  a:focus-visible, button:focus-visible, [tabindex]:focus-visible{ outline:2px solid #1d4ed8; outline-offset:2px; border-radius:6px }
+  input:focus-visible, select:focus-visible, textarea:focus-visible{ outline:2px solid #1d4ed8; outline-offset:1px }
   .fade{ animation: fade .18s ease }
   @keyframes fade{ from{opacity:0; transform:translateY(4px)} to{opacity:1; transform:none} }
   [data-tab]{ transition: color .15s }
@@ -62,6 +71,7 @@
 </style>
 
 <body class="bg-slate-50 text-slate-800 antialiased">
+<a href="#view" class="sr-only focus:not-sr-only focus:fixed focus:z-50 focus:top-2 focus:left-2 focus:bg-brand focus:text-white focus:px-4 focus:py-2 focus:rounded-xl focus:shadow-lg">Saltar al contenido</a>
 <div id="app"></div>
 
 <script>
@@ -508,6 +518,9 @@ let modal = null; // {title, body, onOpen}
 function toast(msg, type='ok'){
   const t = document.createElement('div');
   t.className = `fixed z-50 bottom-6 left-1/2 -translate-x-1/2 px-4 py-2.5 rounded-xl text-sm font-medium shadow-lg text-white ${type==='ok'?'bg-teal-600':'bg-rose-600'}`;
+  // Anuncio a lectores de pantalla (4.1.3): estado -> polite, error -> assertive
+  t.setAttribute('role', type==='ok'?'status':'alert');
+  t.setAttribute('aria-live', type==='ok'?'polite':'assertive');
   t.textContent = msg; document.body.appendChild(t);
   setTimeout(()=>{ t.style.transition='opacity .3s'; t.style.opacity='0'; setTimeout(()=>t.remove(),300); }, 1800);
 }
@@ -573,14 +586,14 @@ function render(){
     <aside class="hidden md:flex md:w-60 flex-col grad-brand text-white p-4 sticky top-0 h-screen">
       <div class="flex items-center gap-2 px-2 py-3 mb-2">
         <div class="w-9 h-9 rounded-xl bg-white/20 grid place-items-center text-lg">💊</div>
-        <div><div class="font-bold leading-tight">${esc(DB.config.negocio)}</div><div class="text-[11px] text-white/50">Gestión de farmacia</div></div>
+        <div><div class="font-bold leading-tight">${esc(DB.config.negocio)}</div><div class="text-[11px] text-white/75">Gestión de farmacia</div></div>
       </div>
       <nav class="flex-1 space-y-1">
         ${NAV.map(n=>navBtn(n,false)).join('')}
       </nav>
       <button onclick="openCuenta()" class="mt-2 text-left px-3 py-2.5 rounded-xl text-sm hover:bg-white/10 flex items-center gap-3"><span class="cloudBadgeInner" style="color:#dbeafe">☁️ Nube</span></button>
-      <button onclick="toggleTheme()" class="text-left px-3 py-2.5 rounded-xl text-sm text-white/80 hover:bg-white/10 flex items-center gap-3">${getTheme()==='dark'?'☀️ <span>Tema claro</span>':'🌙 <span>Tema oscuro</span>'}</button>
-      <button onclick="openConfig()" class="text-left px-3 py-2.5 rounded-xl text-sm text-white/80 hover:bg-white/10 flex items-center gap-3">⚙️ <span>Ajustes</span></button>
+      <button onclick="toggleTheme()" class="text-left px-3 py-2.5 rounded-xl text-sm text-white/90 hover:bg-white/10 flex items-center gap-3">${getTheme()==='dark'?'☀️ <span>Tema claro</span>':'🌙 <span>Tema oscuro</span>'}</button>
+      <button onclick="openConfig()" class="text-left px-3 py-2.5 rounded-xl text-sm text-white/90 hover:bg-white/10 flex items-center gap-3">⚙️ <span>Ajustes</span></button>
     </aside>
 
     <!-- Main -->
@@ -589,12 +602,12 @@ function render(){
       <header class="md:hidden sticky top-0 z-20 grad-brand text-white px-4 h-14 flex items-center justify-between shadow-md">
         <div class="flex items-center gap-2"><div class="w-8 h-8 rounded-lg bg-white/20 grid place-items-center">💊</div><span class="font-bold">${esc(DB.config.negocio)}</span></div>
         <div class="flex items-center gap-3">
-          <button onclick="toggleTheme()" class="text-lg">${getTheme()==='dark'?'☀️':'🌙'}</button>
-          <button onclick="openCuenta()" class="text-xs"><span class="cloudBadgeInner" style="color:#dbeafe">☁️</span></button>
-          <button onclick="openConfig()" class="text-white/80 text-xl">⚙️</button>
+          <button onclick="toggleTheme()" aria-label="Cambiar tema" class="text-lg">${getTheme()==='dark'?'☀️':'🌙'}</button>
+          <button onclick="openCuenta()" aria-label="Nube y cuenta" class="text-xs"><span class="cloudBadgeInner" style="color:#dbeafe">☁️</span></button>
+          <button onclick="openConfig()" aria-label="Ajustes" class="text-white/90 text-xl">⚙️</button>
         </div>
       </header>
-      <div id="view" class="max-w-5xl mx-auto p-4 md:p-6 fade"></div>
+      <div id="view" tabindex="-1" class="max-w-5xl mx-auto p-4 md:p-6 fade outline-none"></div>
     </main>
 
     <!-- Bottom nav (mobile) -->
@@ -610,7 +623,7 @@ function render(){
 function navBtn(n){
   const active = route===n.id;
   const badge = n.id==='vencimientos' && alertsCount()>0 ? `<span class="ml-auto text-[10px] bg-rose-500 text-white rounded-full px-1.5 py-0.5">${alertsCount()}</span>` : '';
-  return `<button data-tab onclick="go('${n.id}')" class="w-full text-left px-3 py-2.5 rounded-xl text-sm flex items-center gap-3 ${active?'bg-white/20 text-white font-semibold shadow-sm':'text-white/70 hover:bg-white/10 hover:text-white'}">${n.icon} <span>${n.label}</span>${badge}</button>`;
+  return `<button data-tab onclick="go('${n.id}')" class="w-full text-left px-3 py-2.5 rounded-xl text-sm flex items-center gap-3 ${active?'bg-white/20 text-white font-semibold shadow-sm':'text-white/90 hover:bg-white/10 hover:text-white'}">${n.icon} <span>${n.label}</span>${badge}</button>`;
 }
 function navBtnMobile(n){
   const active = route===n.id;
@@ -646,7 +659,7 @@ function searchBar(id, placeholder){
   const st = listFilters[id];
   return `<div class="mb-4 relative">
     <span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm pointer-events-none">🔍</span>
-    <input type="search" data-filter-for="${id}" value="${esc(st?.qRaw||'')}" oninput="filterList(this,'${id}')" placeholder="${placeholder}" class="w-full border border-slate-200 rounded-xl pl-9 pr-3 py-2.5 text-sm focus:border-brand focus:ring-2 focus:ring-brand-100">
+    <input type="search" data-filter-for="${id}" value="${esc(st?.qRaw||'')}" oninput="filterList(this,'${id}')" placeholder="${placeholder}" aria-label="${esc(placeholder)}" class="w-full border border-slate-200 rounded-xl pl-9 pr-3 py-2.5 text-sm focus:border-brand focus:ring-2 focus:ring-brand-100">
   </div>`;
 }
 const noRes = id => `<div id="${id}-empty" style="display:none" class="text-center text-slate-400 py-10 text-sm">Sin resultados para tu búsqueda 🔍</div>`;
@@ -755,7 +768,7 @@ function catPick(i){
 function catBlur(){ setTimeout(()=>{ const d=document.getElementById('catDrop'); if(d) d.classList.add('hidden'); }, 150); }
 function fotoAreaInner(){
   return fotoTmp
-    ? `<div class="relative w-24 h-24"><img src="${fotoSrc(fotoTmp)}" class="w-24 h-24 object-cover rounded-xl border border-slate-200"><button type="button" onclick="quitarFoto()" class="absolute -top-2 -right-2 bg-rose-500 text-white w-6 h-6 rounded-full text-sm leading-none">×</button></div>`
+    ? `<div class="relative w-24 h-24"><img src="${fotoSrc(fotoTmp)}" alt="" class="w-24 h-24 object-cover rounded-xl border border-slate-200"><button type="button" onclick="quitarFoto()" aria-label="Quitar foto" class="absolute -top-2 -right-2 bg-rose-500 text-white w-6 h-6 rounded-full text-sm leading-none">×</button></div>`
     : `<label class="w-24 h-24 border-2 border-dashed border-slate-200 rounded-xl grid place-items-center cursor-pointer text-slate-400 hover:border-brand hover:text-brand text-center text-xs leading-tight"><input type="file" accept="image/*" class="hidden" onchange="onFoto(this)">📷<br>Foto</label>`;
 }
 
@@ -866,7 +879,7 @@ function viewInventario(){
     mostrados++;
     const st = filtroActivo ? lotes.reduce((s,l)=>s+l.cantidad,0) : stockDe(p);
     const nombreCell = `<div class="flex items-center gap-3">
-        ${fotoSrc(p.foto)?`<img src="${fotoSrc(p.foto)}" class="w-10 h-10 rounded-lg object-cover border border-slate-100 shrink-0">`:`<div class="w-10 h-10 rounded-lg bg-slate-100 grid place-items-center text-slate-300 shrink-0">📦</div>`}
+        ${fotoSrc(p.foto)?`<img src="${fotoSrc(p.foto)}" alt="" class="w-10 h-10 rounded-lg object-cover border border-slate-100 shrink-0">`:`<div class="w-10 h-10 rounded-lg bg-slate-100 grid place-items-center text-slate-300 shrink-0">📦</div>`}
         <div class="min-w-0"><div class="font-medium truncate">${esc(p.nombre)}</div><div class="text-xs text-slate-400 truncate">${esc(p.categoria||'Sin categoría')}${lotes.length===1&&lotes[0].lote?` · Lote ${esc(lotes[0].lote)}`:''}${lotes.length>1?` · ${lotes.length} lotes`:''}</div></div>
       </div>`;
     if(lotes.length<=1){
@@ -1023,26 +1036,51 @@ function viewReportes(){
 /* ============================================================
    MODALES / FORMULARIOS
    ============================================================ */
+let modalLastFocus=null;
 function openModal(title, bodyHtml, size='md'){
+  // Guarda el foco actual (el disparador) para devolverlo al cerrar — accesibilidad de teclado/lector
+  if(!modal) modalLastFocus = document.activeElement;
   modal = { title, bodyHtml, size };
   renderModal();
 }
-function closeModal(){ modal=null; const m=$('#modal'); if(m) m.remove(); }
+function closeModal(){
+  modal=null; const m=$('#modal'); if(m) m.remove();
+  if(modalLastFocus && typeof modalLastFocus.focus==='function'){ try{ modalLastFocus.focus(); }catch(e){} }
+  modalLastFocus=null;
+}
+// Elementos enfocables visibles dentro de un contenedor (para atrapar el foco en el modal)
+function focusablesEn(el){
+  return [...el.querySelectorAll('a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])')].filter(x=>x.offsetParent!==null);
+}
+function modalKeydown(e){
+  if(e.key==='Escape'){ e.preventDefault(); closeModal(); return; }
+  if(e.key!=='Tab') return;
+  const el=$('#modal'); if(!el) return;
+  const foci=focusablesEn(el); if(!foci.length) return;
+  const first=foci[0], last=foci[foci.length-1];
+  if(e.shiftKey && document.activeElement===first){ e.preventDefault(); last.focus(); }
+  else if(!e.shiftKey && document.activeElement===last){ e.preventDefault(); first.focus(); }
+}
 function renderModal(){
   const old=$('#modal'); if(old) old.remove();
   const w = {sm:'max-w-sm',md:'max-w-lg',lg:'max-w-2xl'}[modal.size]||'max-w-lg';
   const el=document.createElement('div');
   el.id='modal';
   el.className='fixed inset-0 z-40 flex items-end md:items-center justify-center bg-black/40 p-0 md:p-4';
-  el.innerHTML=`<div class="bg-white w-full ${w} rounded-t-3xl md:rounded-2xl max-h-[92vh] overflow-y-auto fade">
+  el.innerHTML=`<div role="dialog" aria-modal="true" aria-labelledby="modalTitle" class="bg-white w-full ${w} rounded-t-3xl md:rounded-2xl max-h-[92vh] overflow-y-auto fade">
       <div class="sticky top-0 bg-white flex items-center justify-between px-5 py-4 border-b border-slate-100">
-        <h3 class="font-bold text-lg">${modal.title}</h3>
-        <button onclick="closeModal()" class="text-slate-400 text-2xl leading-none w-8 h-8 grid place-items-center hover:bg-slate-100 rounded-lg">×</button>
+        <h3 id="modalTitle" class="font-bold text-lg">${modal.title}</h3>
+        <button onclick="closeModal()" aria-label="Cerrar" class="text-slate-500 text-2xl leading-none w-9 h-9 grid place-items-center hover:bg-slate-100 rounded-lg">×</button>
       </div>
       <div class="p-5">${modal.bodyHtml}</div>
     </div>`;
   el.addEventListener('click',e=>{ if(e.target===el) closeModal(); });
+  el.addEventListener('keydown', modalKeydown);
   document.body.appendChild(el);
+  // Lleva el foco al primer campo/botón del modal (mejor: el primer input; si no, el diálogo)
+  const foci=focusablesEn(el);
+  const primero = foci.find(x=>/^(INPUT|SELECT|TEXTAREA)$/.test(x.tagName)) || foci[0];
+  if(primero) primero.focus();
 }
 const field = (label,inner) => `<label class="block mb-3"><span class="text-xs font-medium text-slate-500">${label}</span>${inner}</label>`;
 const inputCls = "mt-1 w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:border-brand focus:ring-2 focus:ring-brand-100";
@@ -1343,16 +1381,16 @@ function ventaBody(){
   }
   return `
     <div class="flex gap-2 mb-1">
-      <select id="vProd" onchange="onProdVentaChange()" class="${inputCls} flex-1"><option value="">Agregar producto…</option>${opts}</select>
-      <input id="vCant" type="number" min="1" value="1" class="${inputCls} w-16" title="Cantidad">
+      <select id="vProd" onchange="onProdVentaChange()" aria-label="Producto a agregar" class="${inputCls} flex-1"><option value="">Agregar producto…</option>${opts}</select>
+      <input id="vCant" type="number" min="1" value="1" class="${inputCls} w-16" title="Cantidad" aria-label="Cantidad">
     </div>
     <div class="flex gap-2 mb-3">
-      <input id="vPrecio" type="number" min="0" step="any" placeholder="Precio de venta" class="${inputCls} flex-1" title="Precio (editable para ofrecer una tarifa especial o descuento)">
+      <input id="vPrecio" type="number" min="0" step="any" placeholder="Precio de venta" aria-label="Precio de venta" class="${inputCls} flex-1" title="Precio (editable para ofrecer una tarifa especial o descuento)">
       <button type="button" onclick="addCarrito()" class="bg-brand text-white px-4 rounded-xl font-semibold shrink-0">+ Agregar</button>
     </div>
     ${carritoV.length? `<div class="space-y-2 mb-3">${carritoV.map((i,idx)=>{const p=getProducto(i.prodId); const especial=p&&i.precio!==p.precioVenta; return `
       <div class="flex items-center gap-2 bg-slate-50 rounded-xl p-2.5">
-        ${fotoSrc(p.foto)?`<img src="${fotoSrc(p.foto)}" class="w-9 h-9 rounded-lg object-cover shrink-0">`:''}
+        ${fotoSrc(p.foto)?`<img src="${fotoSrc(p.foto)}" alt="" class="w-9 h-9 rounded-lg object-cover shrink-0">`:''}
         <div class="flex-1 min-w-0"><div class="text-sm font-medium truncate">${esc(p.nombre)}</div><div class="text-xs text-slate-400">${i.cant} × ${fmtMoney(i.precio)} ${especial?'<span class="text-amber-600 font-medium">· precio especial</span>':''}</div></div>
         <div class="text-sm font-semibold">${fmtMoney(i.cant*i.precio)}</div>
         <button type="button" onclick="rmCarrito(${idx})" class="text-rose-400 text-lg px-1">×</button>
@@ -1643,10 +1681,10 @@ function compraBody(){
       </div>
     </label>
     <div class="grid grid-cols-12 gap-2 mb-2">
-      <input id="cCant" type="number" min="1" value="1" placeholder="Cant" class="${inputCls} col-span-3">
-      <input id="cCosto" type="number" min="0" step="any" placeholder="Costo u." class="${inputCls} col-span-3">
-      <input id="cLote" placeholder="Lote" class="${inputCls} col-span-3">
-      <input id="cVenc" type="date" title="Vencimiento" class="${inputCls} col-span-3">
+      <input id="cCant" type="number" min="1" value="1" placeholder="Cant" aria-label="Cantidad" class="${inputCls} col-span-3">
+      <input id="cCosto" type="number" min="0" step="any" placeholder="Costo u." aria-label="Costo unitario" class="${inputCls} col-span-3">
+      <input id="cLote" placeholder="Lote" aria-label="Lote" class="${inputCls} col-span-3">
+      <input id="cVenc" type="date" title="Vencimiento" aria-label="Vencimiento" class="${inputCls} col-span-3">
     </div>
     <button type="button" onclick="addCompra()" class="w-full border border-brand text-brand-700 font-semibold rounded-xl py-2 mb-3 hover:bg-brand-50">+ Agregar a la compra</button>
     ${carritoC.length? `<div class="space-y-2 mb-3">${carritoC.map((i,idx)=>{
@@ -2020,3 +2058,4 @@ document.addEventListener('visibilitychange', ()=>{
 });
 </script>
 </body>
+</html>
