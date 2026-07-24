@@ -210,6 +210,7 @@ const store = {
   migrar(d){
     d.config = Object.assign({ negocio:'Mi Negocio', alertaVencimiento:30, alertaStock:5, nextConsecutivo:1 }, d.config||{});
     ['clientes','productos','compras','ventas','gastos','proveedores'].forEach(k=>{ if(!Array.isArray(d[k])) d[k]=[]; });
+    d.productos.forEach(p=>(p.lotes||[]).forEach(l=>{ if(!l.id) l.id=uid(); })); // lotes viejos sin id (previos a la edición por lote)
     const yaAsignados = d.ventas.map(v=>v.consecutivo).filter(Boolean);
     const maxAsignado = yaAsignados.length ? Math.max(...yaAsignados) : 0;
     if(!(d.config.nextConsecutivo > maxAsignado)) d.config.nextConsecutivo = maxAsignado+1; // cubre undefined/NaN
@@ -464,6 +465,39 @@ function agregarLote(prodId, cantidad, venc, costo, lote){
   const p = getProducto(prodId); if(!p) return;
   p.lotes = p.lotes||[];
   p.lotes.push({ id:uid(), cantidad:+cantidad, venc:venc||'', costo:+costo||p.precioCompra||0, lote:lote||'' });
+}
+// Edición manual de un lote existente (ajuste de cantidad, vencimiento, código de lote o costo)
+function openLote(prodId, loteId){
+  const p = getProducto(prodId); if(!p) return;
+  const l = (p.lotes||[]).find(x=>x.id===loteId); if(!l) return;
+  openModal('Ajustar lote',
+    `<div class="text-sm text-slate-400 mb-3">${esc(p.nombre)}</div>
+     <form onsubmit="return saveLote(event,'${prodId}','${loteId}')">
+      ${field('Cantidad en stock *',`<input name="cantidad" type="number" min="0" step="any" required value="${l.cantidad}" class="${inputCls}">`)}
+      ${field('Lote (código)',`<input name="lote" value="${esc(l.lote||'')}" class="${inputCls}" placeholder="Lote del medicamento">`)}
+      ${field('Vencimiento',`<input name="venc" type="date" value="${l.venc||''}" class="${inputCls}">`)}
+      ${field('Costo unitario',`<input name="costo" type="number" min="0" step="any" value="${l.costo||''}" class="${inputCls}">`)}
+      <div class="flex gap-2 mt-4">
+        <button type="submit" class="flex-1 bg-brand hover:bg-brand-700 text-white font-semibold py-2.5 rounded-xl">Guardar</button>
+        <button type="button" onclick="delLote('${prodId}','${loteId}')" class="px-4 py-2.5 rounded-xl border border-rose-200 text-rose-600 text-sm">Eliminar lote</button>
+      </div>
+     </form>`);
+}
+function saveLote(e,prodId,loteId){
+  e.preventDefault(); const f=e.target;
+  const p=getProducto(prodId); if(!p) return false;
+  const l=(p.lotes||[]).find(x=>x.id===loteId); if(!l) return false;
+  const n=+f.cantidad.value; if(isNaN(n)||n<0){ toast('Cantidad inválida','err'); return false; }
+  l.cantidad=n; l.lote=f.lote.value.trim(); l.venc=f.venc.value; l.costo=+f.costo.value||0;
+  p.lotes=(p.lotes||[]).filter(x=>x.cantidad>0);
+  store.save(); closeModal(); render(); toast('Lote actualizado');
+  return false;
+}
+function delLote(prodId, loteId){
+  if(!confirm('¿Eliminar este lote? Se quitará su cantidad del stock.')) return;
+  const p=getProducto(prodId); if(!p) return;
+  p.lotes=(p.lotes||[]).filter(x=>x.id!==loteId);
+  store.save(); closeModal(); render(); toast('Lote eliminado');
 }
 
 /* ---------- Estado de UI ---------- */
@@ -842,7 +876,7 @@ function viewInventario(){
         <td class="p-3 text-right whitespace-nowrap">${fmtMoney(p.precioVenta)}</td>
         <td class="p-3 text-center"><span class="font-semibold ${bajo?(st===0?'text-rose-600':'text-amber-600'):''}">${st}</span> <span class="text-xs text-slate-400">${esc(p.unidad||'u')}</span></td>
         <td class="p-3 text-center text-xs ${prox&&daysUntil(prox)<=DB.config.alertaVencimiento?'text-amber-600 font-medium':'text-slate-400'}">${prox?fmtDate(prox):'—'}</td>
-        <td class="p-3 text-right"><button onclick="openProducto('${p.id}')" class="text-xs text-brand-700 font-medium">Editar</button></td>
+        <td class="p-3 text-right whitespace-nowrap"><button onclick="openProducto('${p.id}')" class="text-xs text-brand-700 font-medium">Editar</button>${lotes[0]?` <button onclick="openLote('${p.id}','${lotes[0].id}')" class="text-xs text-teal-700 font-medium ml-2">Ajustar stock</button>`:''}</td>
       </tr>`;
     }
     // Varios lotes: fila del producto (stock total) + una fila por lote, ordenadas por vencimiento
@@ -861,7 +895,7 @@ function viewInventario(){
         <td></td>
         <td class="p-2 text-center text-xs ${urgente?'text-amber-600 font-medium':'text-slate-500'}">${l.cantidad} ${esc(p.unidad||'u')}</td>
         <td class="p-2 text-center text-xs ${d!==null&&d<0?'text-rose-600 font-medium':urgente?'text-amber-600 font-medium':'text-slate-400'}">${l.venc?fmtDate(l.venc):'sin fecha'}${l.lote?` <span class="text-slate-300">· L:${esc(l.lote)}</span>`:''}</td>
-        <td></td>
+        <td class="p-2 text-right"><button onclick="openLote('${p.id}','${l.id}')" class="text-xs text-teal-700 font-medium">Ajustar</button></td>
       </tr>`;
     }).join('');
     return header + subFilas;
