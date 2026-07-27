@@ -1731,7 +1731,7 @@ function compraBody(){
   return `
     ${field('Proveedor <span class="text-slate-300 font-normal">— créalos en el módulo Proveedores</span>',`<select id="cProvId" onchange="onCompraProv()" class="${inputCls}"><option value="">Sin proveedor / otro</option>${provOpts}</select>`)}
     ${field('N° de factura / recibo *',`<input id="cFactura" required class="${inputCls}" placeholder="Ej: FE-00123">`)}
-    <label class="block mb-3"><span class="text-xs font-medium text-slate-500">Adjuntar factura (imagen o PDF) <span class="text-slate-300 font-normal">— obligatorio si la compra es de contado</span></span>
+    <label class="block mb-3"><span class="text-xs font-medium text-slate-500">Adjuntar factura (imagen o PDF) *</span>
       <div id="cFacturaArea" class="mt-1">${adjuntoAreaInner(compraFacturaTmp,'factura','quitarCompraFactura()','cFacturaFile','onCompraFactura(this)')}</div>
     </label>
     <div class="border-t border-slate-100 my-3"></div>
@@ -1819,7 +1819,7 @@ function confirmCompra(){
   if(credito && !prov) return toast('Elige un proveedor para la compra a crédito','err');
   const nFactura=($('#cFactura')?.value||'').trim();
   if(!nFactura) return toast('El número de factura es obligatorio','err');
-  if(!credito && !compraFacturaTmp.data) return toast('Adjunta la foto o PDF de la factura (compra de contado)','err');
+  if(!compraFacturaTmp.data) return toast('Adjunta la foto o PDF de la factura','err');
   const total=carritoC.reduce((s,i)=>s+i.cant*i.costo,0);
   const plazoMeses = credito ? Math.max(1,+($('#cPlazo')?.value)||prov?.plazoMeses||1) : null;
   const venceCredito = credito ? addMonths(todayISO(), plazoMeses) : null;
