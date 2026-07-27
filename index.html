@@ -1730,8 +1730,8 @@ function compraBody(){
   const provOpts=DB.proveedores.slice().sort((a,b)=>a.nombre.localeCompare(b.nombre)).map(p=>`<option value="${p.id}">${esc(p.nombre)}${p.negocio?` — ${esc(p.negocio)}`:''}</option>`).join('');
   return `
     ${field('Proveedor <span class="text-slate-300 font-normal">— créalos en el módulo Proveedores</span>',`<select id="cProvId" onchange="onCompraProv()" class="${inputCls}"><option value="">Sin proveedor / otro</option>${provOpts}</select>`)}
-    ${field('N° de factura / recibo',`<input id="cFactura" class="${inputCls}" placeholder="Ej: FE-00123">`)}
-    <label class="block mb-3"><span class="text-xs font-medium text-slate-500">Adjuntar factura (imagen o PDF)</span>
+    ${field('N° de factura / recibo *',`<input id="cFactura" required class="${inputCls}" placeholder="Ej: FE-00123">`)}
+    <label class="block mb-3"><span class="text-xs font-medium text-slate-500">Adjuntar factura (imagen o PDF) <span class="text-slate-300 font-normal">— obligatorio si la compra es de contado</span></span>
       <div id="cFacturaArea" class="mt-1">${adjuntoAreaInner(compraFacturaTmp,'factura','quitarCompraFactura()','cFacturaFile','onCompraFactura(this)')}</div>
     </label>
     <div class="border-t border-slate-100 my-3"></div>
@@ -1742,11 +1742,12 @@ function compraBody(){
         <div id="cProdDrop" class="hidden absolute z-30 left-0 right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-xl max-h-60 overflow-y-auto"></div>
       </div>
     </label>
+    <p class="text-[11px] text-slate-400 mb-1">Cantidad, costo, lote y vencimiento son obligatorios *</p>
     <div class="grid grid-cols-12 gap-2 mb-2">
-      <input id="cCant" type="number" min="1" value="1" placeholder="Cant" aria-label="Cantidad" class="${inputCls} col-span-3">
-      <input id="cCosto" type="number" min="0" step="any" placeholder="Costo u." aria-label="Costo unitario" class="${inputCls} col-span-3">
-      <input id="cLote" placeholder="Lote" aria-label="Lote" class="${inputCls} col-span-3">
-      <input id="cVenc" type="date" title="Vencimiento" aria-label="Vencimiento" class="${inputCls} col-span-3">
+      <input id="cCant" type="number" min="1" value="1" placeholder="Cant *" aria-label="Cantidad" class="${inputCls} col-span-3">
+      <input id="cCosto" type="number" min="0" step="any" placeholder="Costo u. *" aria-label="Costo unitario" class="${inputCls} col-span-3">
+      <input id="cLote" placeholder="Lote *" aria-label="Lote" class="${inputCls} col-span-3">
+      <input id="cVenc" type="date" title="Vencimiento (obligatorio)" aria-label="Vencimiento" class="${inputCls} col-span-3">
     </div>
     <button type="button" onclick="addCompra()" class="w-full border border-brand text-brand-700 font-semibold rounded-xl py-2 mb-3 hover:bg-brand-50">+ Agregar a la compra</button>
     ${carritoC.length? `<div class="space-y-2 mb-3">${carritoC.map((i,idx)=>{
@@ -1800,6 +1801,9 @@ function addCompra(){
   const cant=+$('#cCant').value||0; const costo=+$('#cCosto').value||0; const venc=$('#cVenc').value; const lote=$('#cLote').value.trim();
   if(!nombre) return toast('Escribe o elige un medicamento','err');
   if(cant<=0) return toast('Cantidad inválida','err');
+  if(costo<=0) return toast('Escribe el costo unitario','err');
+  if(!lote) return toast('El lote es obligatorio','err');
+  if(!venc) return toast('La fecha de vencimiento es obligatoria','err');
   const existente = DB.productos.find(x=>x.nombre.toLowerCase()===nombre.toLowerCase());
   carritoC.push({ prodId: existente?existente.id:null, nombre, cant, costo, venc, lote });
   refreshCompra();
@@ -1813,6 +1817,9 @@ function confirmCompra(){
   const proveedor=prov?prov.nombre:'';
   const credito=$('#cCredito')?.checked||false;
   if(credito && !prov) return toast('Elige un proveedor para la compra a crédito','err');
+  const nFactura=($('#cFactura')?.value||'').trim();
+  if(!nFactura) return toast('El número de factura es obligatorio','err');
+  if(!credito && !compraFacturaTmp.data) return toast('Adjunta la foto o PDF de la factura (compra de contado)','err');
   const total=carritoC.reduce((s,i)=>s+i.cant*i.costo,0);
   const plazoMeses = credito ? Math.max(1,+($('#cPlazo')?.value)||prov?.plazoMeses||1) : null;
   const venceCredito = credito ? addMonths(todayISO(), plazoMeses) : null;
