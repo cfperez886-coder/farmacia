@@ -1585,7 +1585,8 @@ function printTicket(texto){
 }
 // Genera el ticket como PNG del ancho EXACTO del cabezal (384/576 px) para compartirlo
 // a la app de la impresora (Fun Print y similares imprimen imagenes).
-function ticketImagen(texto, nombre){
+// Dibuja el ticket en un canvas del ancho EXACTO del cabezal (384/576 px)
+function ticketCanvas(texto){
   const m = ticketMedidas();
   const W = m.dots, pad = 8;
   const fs = (m.dots===576 ? 26 : 22), lh = Math.round(fs*1.35);
@@ -1615,9 +1616,44 @@ function ticketImagen(texto, nombre){
   ctx.fillStyle='#fff'; ctx.fillRect(0,0,cv.width,cv.height);
   ctx.fillStyle='#000'; ctx.font=font; ctx.textBaseline='top';
   lineas.forEach((l,i)=> ctx.fillText(l, pad, pad + i*lh));
-  const a=document.createElement('a');
-  a.href=cv.toDataURL('image/png'); a.download=(nombre||'ticket')+'.png'; a.click();
-  toast('Imagen guardada: abrela en tu app de impresion');
+  return cv;
+}
+// data:URL -> Blob de forma SINCRONA (no usar toBlob: su callback async pierde el
+// "gesto del usuario" y iOS bloquea navigator.share)
+function dataURLaBlob(durl){
+  const [cab, b64] = durl.split(',');
+  const mime = (cab.match(/:(.*?);/)||[])[1] || 'image/png';
+  const bin = atob(b64);
+  const u8 = new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++) u8[i] = bin.charCodeAt(i);
+  return new Blob([u8], {type:mime});
+}
+/* Entrega el ticket como imagen.
+   En celular abre el menú de COMPARTIR del sistema: desde ahí se manda directo a la app
+   de la impresora (Fun Print) o se guarda en Fotos. En iPhone la descarga automática de
+   un <a download> no llega a Fotos, por eso compartir es el camino correcto. */
+function ticketImagen(texto, nombre){
+  const cv = ticketCanvas(texto);
+  const durl = cv.toDataURL('image/png');
+  const archivo = (nombre||'ticket')+'.png';
+  try{
+    const file = new File([dataURLaBlob(durl)], archivo, {type:'image/png'});
+    if(navigator.canShare && navigator.canShare({files:[file]})){
+      navigator.share({files:[file], title:'Ticket'})
+        .catch(e=>{ if(!e || e.name!=='AbortError') verTicketImagen(durl, archivo); });
+      return;
+    }
+  }catch(e){ /* sin soporte de compartir archivos: se muestra la imagen */ }
+  verTicketImagen(durl, archivo);
+}
+// Respaldo: muestra la imagen para guardarla manteniéndola pulsada (iOS) o descargarla
+function verTicketImagen(durl, archivo){
+  openModal('Ticket listo para imprimir',
+    `<p class="text-sm text-slate-500 mb-3">Mantén pulsada la imagen y elige <b>“Añadir a Fotos”</b> (o <b>“Guardar imagen”</b>). Luego ábrela desde la app de tu impresora.</p>
+     <div class="bg-white border border-slate-200 rounded-xl p-2 flex justify-center mb-3">
+       <img src="${durl}" alt="Ticket" style="width:${ticketMedidas().dots===576?288:230}px;image-rendering:pixelated" class="max-w-full">
+     </div>
+     <a href="${durl}" download="${esc(archivo)}" class="block w-full text-center bg-brand hover:bg-brand-700 text-white font-semibold py-2.5 rounded-xl">⬇️ Descargar imagen</a>`);
 }
 function printVenta(id){
   const v=DB.ventas.find(x=>x.id===id); if(!v) return;
