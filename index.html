@@ -225,7 +225,7 @@ const store = {
   // Normaliza cualquier juego de datos (local o traído de la nube): campos nuevos,
   // arrays garantizados y consecutivo de venta sin huecos ni duplicados.
   migrar(d){
-    d.config = Object.assign({ negocio:'Mi Negocio', alertaVencimiento:30, alertaStock:5, nextConsecutivo:1, anchoTicket:58 }, d.config||{});
+    d.config = Object.assign({ negocio:'Mi Negocio', alertaVencimiento:30, alertaStock:5, nextConsecutivo:1, anchoTicket:58, ticketCPL:32 }, d.config||{});
     ['clientes','productos','compras','ventas','gastos','proveedores'].forEach(k=>{ if(!Array.isArray(d[k])) d[k]=[]; });
     d.productos.forEach(p=>(p.lotes||[]).forEach(l=>{ if(!l.id) l.id=uid(); })); // lotes viejos sin id (previos a la edición por lote)
     const yaAsignados = d.ventas.map(v=>v.consecutivo).filter(Boolean);
@@ -1557,9 +1557,22 @@ function waVenta(id){
    Antes se imprimia sin declarar el tamano del papel: el navegador maquetaba una hoja
    carta/A4 (~210mm) y la impresora la encogia para caber en 58mm -> salia diminuto.
    Ahora se declara @page con el ancho real del rollo, con tipografia grande y negra. */
-const ticketMedidas = () => (+DB.config.anchoTicket===80)
-  ? {mm:80, util:72, dots:576}   // 80mm: area imprimible 72mm = 576 puntos (203 dpi)
-  : {mm:58, util:48, dots:384};  // 58mm: area imprimible 48mm = 384 puntos
+// Tamano de letra = cuantos caracteres caben por linea (24 grande / 32 normal / 40 pequena).
+// Courier avanza 0.6 em por caracter, asi que: tamano = ancho_util / caracteres / 0.6
+const CPL_OPCIONES = [{v:24,t:'Grande'},{v:32,t:'Normal'},{v:40,t:'Pequeña'}];
+const ticketCPL = () => { const n=+DB.config.ticketCPL; return CPL_OPCIONES.some(o=>o.v===n) ? n : 32; };
+const ticketMedidas = () => {
+  const base = (+DB.config.anchoTicket===80)
+    ? {mm:80, util:72, dots:576}   // 80mm: area imprimible 72mm = 576 puntos (203 dpi)
+    : {mm:58, util:48, dots:384};  // 58mm: area imprimible 48mm = 384 puntos
+  const cpl = ticketCPL(), pad = 8;
+  return Object.assign(base, {
+    cpl,
+    pad,
+    fuenteMm: +(base.util / cpl / 0.6).toFixed(2),                 // para imprimir (HTML)
+    fuentePx: Math.max(10, Math.round((base.dots - pad*2) / cpl / 0.6)) // para la imagen (PNG)
+  });
+};
 // Los emoji salen como cuadros en la termica: se quitan del ticket
 const sinEmoji = t => String(t).replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}\u{FE0F}\u{20E3}]/gu,'');
 const ticketTexto = t => sinEmoji(String(t).replace(/\*/g,'')).split('\n').map(l=>l.replace(/\s+$/,'')).join('\n').trim();
@@ -1572,7 +1585,7 @@ function ticketHTML(texto){
     html,body{ margin:0; padding:0; background:#fff }
     body{ width:${m.mm}mm }
     pre{ margin:0; padding:2mm ${margen}mm; width:${m.mm}mm;
-         font-family:"Courier New",monospace; font-size:${m.mm===80?12:11}pt; line-height:1.35;
+         font-family:"Courier New",monospace; font-size:${m.fuenteMm}mm; line-height:1.35;
          font-weight:700; color:#000;
          white-space:pre-wrap; word-break:break-word }
     @media print{ html,body{ width:${m.mm}mm } }
@@ -1589,8 +1602,8 @@ function printTicket(texto){
 // Dibuja el ticket en un canvas del ancho EXACTO del cabezal (384/576 px)
 function ticketCanvas(texto){
   const m = ticketMedidas();
-  const W = m.dots, pad = 8;
-  const fs = (m.dots===576 ? 26 : 22), lh = Math.round(fs*1.35);
+  const W = m.dots, pad = m.pad;
+  const fs = m.fuentePx, lh = Math.round(fs*1.35);
   const font = `700 ${fs}px "Courier New",monospace`;
   const cv = document.createElement('canvas');
   let ctx = cv.getContext('2d'); ctx.font = font;
@@ -2189,7 +2202,10 @@ function openConfig(){
        ${field('Alerta vencimiento (días)',`<input id="cfgVenc" type="number" min="1" value="${DB.config.alertaVencimiento}" class="${inputCls}">`)}
        ${field('Alerta stock bajo (≤)',`<input id="cfgStock" type="number" min="0" value="${DB.config.alertaStock}" class="${inputCls}">`)}
      </div>
-     ${field('Ancho del rollo de la impresora',`<select id="cfgTicket" class="${inputCls}"><option value="58"${(+DB.config.anchoTicket===80)?'':' selected'}>58 mm (mini impresora térmica)</option><option value="80"${(+DB.config.anchoTicket===80)?' selected':''}>80 mm (impresora de mostrador)</option></select>`)}
+     <div class="grid grid-cols-2 gap-2">
+       ${field('Ancho del rollo',`<select id="cfgTicket" class="${inputCls}"><option value="58"${(+DB.config.anchoTicket===80)?'':' selected'}>58 mm (mini térmica)</option><option value="80"${(+DB.config.anchoTicket===80)?' selected':''}>80 mm (mostrador)</option></select>`)}
+       ${field('Letra del ticket',`<select id="cfgCPL" class="${inputCls}">${CPL_OPCIONES.map(o=>`<option value="${o.v}"${ticketCPL()===o.v?' selected':''}>${o.t} (${o.v} caracteres)</option>`).join('')}</select>`)}
+     </div>
      <button onclick="saveConfig()" class="w-full bg-brand text-white font-semibold py-2.5 rounded-xl mb-4">Guardar ajustes</button>
      <div class="border-t border-slate-100 pt-4 mb-4">
        <p class="text-xs text-slate-400 mb-2">Cargue masivo de inventario (Excel)</p>
@@ -2214,6 +2230,7 @@ function saveConfig(){
   DB.config.alertaVencimiento=+$('#cfgVenc').value||30;
   DB.config.alertaStock=+$('#cfgStock').value||5;
   DB.config.anchoTicket=(+$('#cfgTicket')?.value===80)?80:58;
+  DB.config.ticketCPL=+$('#cfgCPL')?.value||32;
   store.save(); closeModal(); render(); toast('Ajustes guardados');
 }
 function exportData(){
