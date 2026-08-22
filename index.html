@@ -1534,8 +1534,9 @@ function verVenta(id){
      <div class="flex gap-2 mt-4">
        <button onclick="waVenta('${id}')" class="flex-1 bg-teal-600 hover:bg-teal-700 text-white py-2.5 rounded-xl text-sm font-semibold">📲 WhatsApp</button>
        <button onclick="printVenta('${id}')" class="flex-1 border border-slate-200 hover:bg-slate-50 py-2.5 rounded-xl text-sm">🖨️ Imprimir</button>
-       <button onclick="imagenVenta('${id}')" title="Guarda el recibo como imagen para enviarlo a la app de tu mini impresora" class="flex-1 border border-slate-200 hover:bg-slate-50 py-2.5 rounded-xl text-sm">🖼️ Imagen</button>
+       <button onclick="imagenVenta('${id}')" title="Genera el recibo como imagen para tu mini impresora térmica" class="flex-1 border border-slate-200 hover:bg-slate-50 py-2.5 rounded-xl text-sm">🖼️ Imagen</button>
      </div>
+     <p class="text-[11px] text-slate-400 mt-1">🖼️ Imagen = ticket para la mini impresora: guárdalo en Fotos y ábrelo desde Fun Print.</p>
      <button onclick="delVenta('${id}')" class="mt-2 w-full border border-rose-200 text-rose-600 py-2.5 rounded-xl text-sm">Anular venta (devuelve stock)</button>`);
 }
 
@@ -1640,6 +1641,7 @@ function ticketImagen(texto, nombre){
     const file = new File([dataURLaBlob(durl)], archivo, {type:'image/png'});
     if(navigator.canShare && navigator.canShare({files:[file]})){
       navigator.share({files:[file], title:'Ticket'})
+        .then(()=> toast('Si no ves tu impresora, elige “Guardar imagen” y ábrela desde Fun Print'))
         .catch(e=>{ if(!e || e.name!=='AbortError') verTicketImagen(durl, archivo); });
       return;
     }
@@ -1649,11 +1651,25 @@ function ticketImagen(texto, nombre){
 // Respaldo: muestra la imagen para guardarla manteniéndola pulsada (iOS) o descargarla
 function verTicketImagen(durl, archivo){
   openModal('Ticket listo para imprimir',
-    `<p class="text-sm text-slate-500 mb-3">Mantén pulsada la imagen y elige <b>“Añadir a Fotos”</b> (o <b>“Guardar imagen”</b>). Luego ábrela desde la app de tu impresora.</p>
+    `${pasosImpresion()}
      <div class="bg-white border border-slate-200 rounded-xl p-2 flex justify-center mb-3">
        <img src="${durl}" alt="Ticket" style="width:${ticketMedidas().dots===576?288:230}px;image-rendering:pixelated" class="max-w-full">
      </div>
+     <p class="text-xs text-slate-400 mb-2 text-center">En el celular: mantén pulsada la imagen y elige “Añadir a Fotos”.</p>
      <a href="${durl}" download="${esc(archivo)}" class="block w-full text-center bg-brand hover:bg-brand-700 text-white font-semibold py-2.5 rounded-xl">⬇️ Descargar imagen</a>`);
+}
+/* Las apps de estas mini impresoras (Fun Print y similares) normalmente NO aparecen en el
+   menú de compartir de iOS: hay que guardar la imagen en Fotos y elegirla desde la app. */
+function pasosImpresion(){
+  return `<div class="bg-brand-50 rounded-xl p-3 mb-3">
+      <p class="text-xs font-semibold text-brand-700 mb-1">Cómo imprimir en la mini impresora (${ticketMedidas().mm} mm)</p>
+      <ol class="text-xs text-slate-600 list-decimal pl-4 space-y-0.5">
+        <li>Guarda esta imagen en <b>Fotos</b>.</li>
+        <li>Abre la app de la impresora (<b>Fun Print</b>) y conéctala por Bluetooth.</li>
+        <li>Elige <b>Imagen / Foto / Álbum</b> y selecciona el ticket.</li>
+        <li>Imprime. Si la app ofrece tamaño, usa el ancho completo del papel.</li>
+      </ol>
+    </div>`;
 }
 function printVenta(id){
   const v=DB.ventas.find(x=>x.id===id); if(!v) return;
