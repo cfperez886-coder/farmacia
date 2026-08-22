@@ -225,7 +225,7 @@ const store = {
   // Normaliza cualquier juego de datos (local o traído de la nube): campos nuevos,
   // arrays garantizados y consecutivo de venta sin huecos ni duplicados.
   migrar(d){
-    d.config = Object.assign({ negocio:'Mi Negocio', alertaVencimiento:30, alertaStock:5, nextConsecutivo:1 }, d.config||{});
+    d.config = Object.assign({ negocio:'Mi Negocio', alertaVencimiento:30, alertaStock:5, nextConsecutivo:1, anchoTicket:58 }, d.config||{});
     ['clientes','productos','compras','ventas','gastos','proveedores'].forEach(k=>{ if(!Array.isArray(d[k])) d[k]=[]; });
     d.productos.forEach(p=>(p.lotes||[]).forEach(l=>{ if(!l.id) l.id=uid(); })); // lotes viejos sin id (previos a la edición por lote)
     const yaAsignados = d.ventas.map(v=>v.consecutivo).filter(Boolean);
@@ -1534,6 +1534,7 @@ function verVenta(id){
      <div class="flex gap-2 mt-4">
        <button onclick="waVenta('${id}')" class="flex-1 bg-teal-600 hover:bg-teal-700 text-white py-2.5 rounded-xl text-sm font-semibold">📲 WhatsApp</button>
        <button onclick="printVenta('${id}')" class="flex-1 border border-slate-200 hover:bg-slate-50 py-2.5 rounded-xl text-sm">🖨️ Imprimir</button>
+       <button onclick="imagenVenta('${id}')" title="Guarda el recibo como imagen para enviarlo a la app de tu mini impresora" class="flex-1 border border-slate-200 hover:bg-slate-50 py-2.5 rounded-xl text-sm">🖼️ Imagen</button>
      </div>
      <button onclick="delVenta('${id}')" class="mt-2 w-full border border-rose-200 text-rose-600 py-2.5 rounded-xl text-sm">Anular venta (devuelve stock)</button>`);
 }
@@ -1551,11 +1552,80 @@ function waVenta(id){
   if(tel.length===10 && tel.startsWith('3')) tel='57'+tel; // celular colombiano
   window.open('https://wa.me/'+(tel||'')+'?text='+encodeURIComponent(reciboTexto(v)),'_blank');
 }
+/* ---------- Impresion en mini impresora termica (58/80 mm, ej. app Fun Print) ----------
+   Antes se imprimia sin declarar el tamano del papel: el navegador maquetaba una hoja
+   carta/A4 (~210mm) y la impresora la encogia para caber en 58mm -> salia diminuto.
+   Ahora se declara @page con el ancho real del rollo, con tipografia grande y negra. */
+const ticketMedidas = () => (+DB.config.anchoTicket===80)
+  ? {mm:80, util:72, dots:576}   // 80mm: area imprimible 72mm = 576 puntos (203 dpi)
+  : {mm:58, util:48, dots:384};  // 58mm: area imprimible 48mm = 384 puntos
+// Los emoji salen como cuadros en la termica: se quitan del ticket
+const sinEmoji = t => String(t).replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}\u{FE0F}\u{20E3}]/gu,'');
+const ticketTexto = t => sinEmoji(String(t).replace(/\*/g,'')).split('\n').map(l=>l.replace(/\s+$/,'')).join('\n').trim();
+
+function ticketHTML(texto){
+  const m = ticketMedidas();
+  const margen = (m.mm - m.util) / 2;
+  return `<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><title>Ticket</title><style>
+    @page{ size:${m.mm}mm auto; margin:0 }
+    html,body{ margin:0; padding:0; background:#fff }
+    body{ width:${m.mm}mm }
+    pre{ margin:0; padding:2mm ${margen}mm; width:${m.mm}mm;
+         font-family:"Courier New",monospace; font-size:${m.mm===80?12:11}pt; line-height:1.35;
+         font-weight:700; color:#000;
+         white-space:pre-wrap; word-break:break-word }
+    @media print{ html,body{ width:${m.mm}mm } }
+  </style></head><body><pre>${esc(ticketTexto(texto))}</pre></body></html>`;
+}
+function printTicket(texto){
+  const w=window.open('','_blank','width=380,height=600'); if(!w) return toast('Permite ventanas emergentes para imprimir','err');
+  w.document.write(ticketHTML(texto));
+  w.document.close(); w.focus();
+  setTimeout(()=>{ try{ w.print(); }catch(e){} }, 300);
+}
+// Genera el ticket como PNG del ancho EXACTO del cabezal (384/576 px) para compartirlo
+// a la app de la impresora (Fun Print y similares imprimen imagenes).
+function ticketImagen(texto, nombre){
+  const m = ticketMedidas();
+  const W = m.dots, pad = 8;
+  const fs = (m.dots===576 ? 26 : 22), lh = Math.round(fs*1.35);
+  const font = `700 ${fs}px "Courier New",monospace`;
+  const cv = document.createElement('canvas');
+  let ctx = cv.getContext('2d'); ctx.font = font;
+  const maxW = W - pad*2, lineas = [];
+  ticketTexto(texto).split('\n').forEach(par=>{
+    if(!par){ lineas.push(''); return; }
+    let linea = '';
+    par.split(' ').forEach(pal=>{
+      const probar = linea ? linea+' '+pal : pal;
+      if(ctx.measureText(probar).width <= maxW){ linea = probar; return; }
+      if(linea) lineas.push(linea);
+      while(ctx.measureText(pal).width > maxW){            // palabra mas larga que el rollo
+        let corte='';
+        for(const ch of pal){ if(ctx.measureText(corte+ch).width > maxW) break; corte += ch; }
+        if(!corte) break;
+        lineas.push(corte); pal = pal.slice(corte.length);
+      }
+      linea = pal;
+    });
+    lineas.push(linea);
+  });
+  cv.width = W; cv.height = pad*2 + lineas.length*lh;
+  ctx = cv.getContext('2d');                                 // el contexto se reinicia al cambiar el tamano
+  ctx.fillStyle='#fff'; ctx.fillRect(0,0,cv.width,cv.height);
+  ctx.fillStyle='#000'; ctx.font=font; ctx.textBaseline='top';
+  lineas.forEach((l,i)=> ctx.fillText(l, pad, pad + i*lh));
+  const a=document.createElement('a');
+  a.href=cv.toDataURL('image/png'); a.download=(nombre||'ticket')+'.png'; a.click();
+  toast('Imagen guardada: abrela en tu app de impresion');
+}
 function printVenta(id){
   const v=DB.ventas.find(x=>x.id===id); if(!v) return;
-  const w=window.open('','_blank','width=380,height=600'); if(!w) return toast('Permite ventanas emergentes para imprimir','err');
-  w.document.write(`<pre style="font:12px/1.5 monospace;white-space:pre-wrap;padding:12px">${esc(reciboTexto(v).replace(/\*/g,''))}</pre>`);
-  w.document.close(); w.focus(); w.print();
+  printTicket(reciboTexto(v));
+}
+function imagenVenta(id){
+  const v=DB.ventas.find(x=>x.id===id); if(!v) return;
+  ticketImagen(reciboTexto(v), 'recibo-'+fmtConsec(v.consecutivo));
 }
 function delVenta(id){
   if(!confirm('¿Anular esta venta? Se devolverá el stock.'))return;
@@ -1684,13 +1754,11 @@ function openCierre(desde,hasta){
      <div class="flex gap-2 mt-2">
        <button onclick="window.open('https://wa.me/?text='+encodeURIComponent(cierreTexto('${d.desde}','${d.hasta}')),'_blank')" class="flex-1 bg-teal-600 hover:bg-teal-700 text-white py-2.5 rounded-xl text-sm font-semibold">📲 WhatsApp</button>
        <button onclick="printCierre('${d.desde}','${d.hasta}')" class="flex-1 border border-slate-200 hover:bg-slate-50 py-2.5 rounded-xl text-sm">🖨️ Imprimir</button>
+       <button onclick="imagenCierre('${d.desde}','${d.hasta}')" title="Guarda el cierre como imagen para enviarlo a la app de tu mini impresora" class="flex-1 border border-slate-200 hover:bg-slate-50 py-2.5 rounded-xl text-sm">🖼️ Imagen</button>
      </div>`);
 }
-function printCierre(desde,hasta){
-  const w=window.open('','_blank','width=380,height=600'); if(!w) return toast('Permite ventanas emergentes para imprimir','err');
-  w.document.write(`<pre style="font:12px/1.5 monospace;white-space:pre-wrap;padding:12px">${esc(cierreTexto(desde,hasta).replace(/\*/g,''))}</pre>`);
-  w.document.close(); w.focus(); w.print();
-}
+function printCierre(desde,hasta){ printTicket(cierreTexto(desde,hasta)); }
+function imagenCierre(desde,hasta){ ticketImagen(cierreTexto(desde,hasta), 'cierre-'+(desde||todayISO())); }
 
 /* ----- Compra ----- */
 let carritoC=[];
@@ -2069,6 +2137,7 @@ function openConfig(){
        ${field('Alerta vencimiento (días)',`<input id="cfgVenc" type="number" min="1" value="${DB.config.alertaVencimiento}" class="${inputCls}">`)}
        ${field('Alerta stock bajo (≤)',`<input id="cfgStock" type="number" min="0" value="${DB.config.alertaStock}" class="${inputCls}">`)}
      </div>
+     ${field('Ancho del rollo de la impresora',`<select id="cfgTicket" class="${inputCls}"><option value="58"${(+DB.config.anchoTicket===80)?'':' selected'}>58 mm (mini impresora térmica)</option><option value="80"${(+DB.config.anchoTicket===80)?' selected':''}>80 mm (impresora de mostrador)</option></select>`)}
      <button onclick="saveConfig()" class="w-full bg-brand text-white font-semibold py-2.5 rounded-xl mb-4">Guardar ajustes</button>
      <div class="border-t border-slate-100 pt-4 mb-4">
        <p class="text-xs text-slate-400 mb-2">Cargue masivo de inventario (Excel)</p>
@@ -2092,6 +2161,7 @@ function saveConfig(){
   DB.config.negocio=$('#cfgNombre').value.trim()||'Mi Negocio';
   DB.config.alertaVencimiento=+$('#cfgVenc').value||30;
   DB.config.alertaStock=+$('#cfgStock').value||5;
+  DB.config.anchoTicket=(+$('#cfgTicket')?.value===80)?80:58;
   store.save(); closeModal(); render(); toast('Ajustes guardados');
 }
 function exportData(){
