@@ -228,6 +228,11 @@ const store = {
     d.config = Object.assign({ negocio:'Mi Negocio', alertaVencimiento:30, alertaStock:5, nextConsecutivo:1, anchoTicket:58, ticketCPL:32 }, d.config||{});
     ['clientes','productos','compras','ventas','gastos','proveedores'].forEach(k=>{ if(!Array.isArray(d[k])) d[k]=[]; });
     d.productos.forEach(p=>(p.lotes||[]).forEach(l=>{ if(!l.id) l.id=uid(); })); // lotes viejos sin id (previos a la edición por lote)
+    // Clientes y proveedores siempre con historial y saldo numerico (repara datos viejos)
+    [].concat(d.clientes, d.proveedores).forEach(x=>{
+      if(!Array.isArray(x.movs)) x.movs=[];
+      if(typeof x.saldo!=='number' || isNaN(x.saldo)) x.saldo=0;
+    });
     const yaAsignados = d.ventas.map(v=>v.consecutivo).filter(Boolean);
     const maxAsignado = yaAsignados.length ? Math.max(...yaAsignados) : 0;
     if(!(d.config.nextConsecutivo > maxAsignado)) d.config.nextConsecutivo = maxAsignado+1; // cubre undefined/NaN
@@ -464,8 +469,9 @@ const getProveedor = id => DB.proveedores.find(p=>p.id===id);
 const stockDe = p => (p.lotes||[]).reduce((s,l)=>s+(+l.cantidad||0),0);
 
 // Descontar cantidad de un producto por FIFO según vencimiento (los que vencen primero salen primero)
+// Devuelve cuanto se pudo descontar realmente (puede ser menos si no hay stock)
 function descontarStock(prodId, cantidad){
-  const p = getProducto(prodId); if(!p) return;
+  const p = getProducto(prodId); if(!p) return 0;
   let restante = cantidad;
   const lotes = (p.lotes||[]).slice().sort((a,b)=>{
     const av=a.venc||'9999', bv=b.venc||'9999'; return av<bv?-1:av>bv?1:0;
@@ -476,6 +482,7 @@ function descontarStock(prodId, cantidad){
     l.cantidad -= usar; restante -= usar;
   }
   p.lotes = (p.lotes||[]).filter(l=>l.cantidad>0);
+  return cantidad - restante;
 }
 // Agregar stock (nuevo lote)
 function agregarLote(prodId, cantidad, venc, costo, lote){
@@ -1185,7 +1192,7 @@ function openCliente(id){
 function saveCliente(e,id){
   e.preventDefault(); const f=e.target;
   const obj={ nombre:f.nombre.value.trim(), negocio:f.negocio.value.trim(), telefono:f.telefono.value.trim(), email:f.email.value.trim(), direccion:f.direccion.value.trim(), notas:f.notas.value.trim(), plazoMeses:Math.max(1,+f.plazoMeses.value||1) };
-  if(id){ Object.assign(getCliente(id),obj); } else { DB.clientes.push({id:uid(),saldo:0,...obj}); }
+  if(id){ Object.assign(getCliente(id),obj); } else { DB.clientes.push({id:uid(),saldo:0,movs:[],...obj}); }
   store.save(); closeModal(); render(); toast('Cliente guardado');
 }
 function delCliente(id){ if(!confirm('¿Eliminar este cliente?'))return; DB.clientes=DB.clientes.filter(c=>c.id!==id); store.save(); closeModal(); render(); toast('Cliente eliminado'); }
@@ -1240,6 +1247,8 @@ function abonar(id){
   const c=getCliente(id);
   const val=prompt(`${c.nombre} debe ${fmtMoney(c.saldo)}.\n¿Cuánto abona?`, c.saldo);
   if(val===null) return; const n=+val; if(isNaN(n)||n<=0) return toast('Monto inválido','err');
+  // El abono no puede exceder la deuda: si no, el saldo y el estado de cuenta dejan de cuadrar
+  if(n > (c.saldo||0)) return toast(`El abono no puede ser mayor a la deuda (${fmtMoney(c.saldo||0)})`,'err');
   c.saldo=Math.max(0,(c.saldo||0)-n);
   c.movs=c.movs||[]; c.movs.push({fecha:todayISO(),tipo:'abono',monto:n});
   store.save(); render(); if(modal) openCliente(id); toast('Abono registrado');
@@ -1315,6 +1324,8 @@ function saveAbonoProv(e,id){
   e.preventDefault(); const f=e.target;
   const p=getProveedor(id); if(!p) return false;
   const n=+f.monto.value; if(isNaN(n)||n<=0){ toast('Monto inválido','err'); return false; }
+  // El pago no puede exceder la deuda: si no, el saldo y el estado de cuenta dejan de cuadrar
+  if(n > (p.saldo||0)){ toast(`El pago no puede ser mayor a la deuda (${fmtMoney(p.saldo||0)})`,'err'); return false; }
   if(!abonoSoporteTmp.data){ toast('Adjunta el soporte de pago antes de registrar','err'); return false; }
   const medioPago=f.medioPago.value;
   p.saldo=Math.max(0,(p.saldo||0)-n);
@@ -1696,8 +1707,20 @@ function delVenta(id){
   if(!confirm('¿Anular esta venta? Se devolverá el stock.'))return;
   const v=DB.ventas.find(x=>x.id===id); if(!v)return;
   v.items.forEach(i=>agregarLote(i.prodId,i.cant,'',i.costo));
-  if(v.fiado && v.clienteId){ const c=getCliente(v.clienteId); if(c){ c.saldo=Math.max(0,(c.saldo||0)-v.total); c.movs=c.movs||[]; c.movs.push({fecha:todayISO(),tipo:'anulacion',monto:v.total}); } }
-  DB.ventas=DB.ventas.filter(x=>x.id!==id); store.save(); closeModal(); render(); toast('Venta anulada');
+  let avisoPago='';
+  if(v.fiado && v.clienteId){
+    const c=getCliente(v.clienteId);
+    if(c){
+      // Solo se revierte lo que el cliente AUN debe; si ya habia abonado, queda a favor suyo
+      const aRevertir=Math.min(v.total, c.saldo||0);
+      const yaPagado=v.total-aRevertir;
+      c.saldo=Math.max(0,(c.saldo||0)-aRevertir);
+      c.movs=c.movs||[]; c.movs.push({fecha:todayISO(),tipo:'anulacion',monto:aRevertir});
+      if(yaPagado>0) avisoPago=` · ${esc(c.nombre)} ya había pagado ${fmtMoney(yaPagado)}: queda a favor suyo`;
+    }
+  }
+  DB.ventas=DB.ventas.filter(x=>x.id!==id); store.save(); closeModal(); render();
+  toast('Venta anulada'+avisoPago);
 }
 
 /* ---------- SUGERENCIA DE REPOSICIÓN ---------- */
@@ -1789,16 +1812,24 @@ function cierreDatos(desde,hasta){
   const porMetodo={};
   vs.filter(v=>!v.fiado).forEach(v=>{ const m=v.metodo||'Efectivo'; porMetodo[m]=(porMetodo[m]||0)+v.total; });
   const abonos=DB.clientes.reduce((s,c)=>s+(c.movs||[]).filter(m=>m.tipo==='abono'&&enRango(m.fecha)).reduce((x,m)=>x+m.monto,0),0);
-  const compras=DB.compras.filter(c=>enRango(c.fecha)).reduce((s,c)=>s+c.total,0);
+  const comprasList=DB.compras.filter(c=>enRango(c.fecha));
+  const compras=comprasList.reduce((s,c)=>s+c.total,0);
+  // Solo las compras DE CONTADO sacan plata de la caja; las de crédito se pagan despues
+  const comprasContado=comprasList.filter(c=>!c.credito).reduce((s,c)=>s+c.total,0);
+  const comprasCredito=compras-comprasContado;
+  // Pagos hechos a proveedores en el periodo (salida de caja)
+  const pagosProv=(DB.proveedores||[]).reduce((s,p)=>s+(p.movs||[]).filter(m=>m.tipo==='abono'&&enRango(m.fecha)).reduce((x,m)=>x+m.monto,0),0);
   const gastosHoy=DB.gastos.filter(g=>enRango(g.fecha)&&g.tipo==='gasto').reduce((s,g)=>s+g.monto,0);
   const ingresosHoy=DB.gastos.filter(g=>enRango(g.fecha)&&g.tipo==='ingreso').reduce((s,g)=>s+g.monto,0);
   const rango = desde===hasta ? fmtDate(desde) : desde==='0000-01-01' ? `hasta el ${fmtDate(hasta)}` : `${fmtDate(desde)} al ${fmtDate(hasta)}`;
-  return { hoy, desde, hasta, rango, esHoy:desde===hoy&&hasta===hoy, n:vs.length, total, fiado, contado:total-fiado, porMetodo, ganancia, abonos, compras, gastosHoy, ingresosHoy, caja:(total-fiado)+abonos+ingresosHoy-gastosHoy };
+  // Caja = lo que entro - lo que salio
+  const caja=(total-fiado)+abonos+ingresosHoy-gastosHoy-comprasContado-pagosProv;
+  return { hoy, desde, hasta, rango, esHoy:desde===hoy&&hasta===hoy, n:vs.length, total, fiado, contado:total-fiado, porMetodo, ganancia, abonos, compras, comprasContado, comprasCredito, pagosProv, gastosHoy, ingresosHoy, caja };
 }
 function cierreTexto(desde,hasta){
   const d=cierreDatos(desde,hasta);
   const metodos=Object.entries(d.porMetodo).map(([m,v])=>`   - ${m}: ${fmtMoney(v)}`).join('\n');
-  return `🧾 *${DB.config.negocio}* — Cierre de caja ${d.rango}\n\nVentas: ${d.n} por ${fmtMoney(d.total)}\n• De contado: ${fmtMoney(d.contado)}${metodos?`\n${metodos}`:''}\n• Crédito: ${fmtMoney(d.fiado)}\nAbonos recibidos: ${fmtMoney(d.abonos)}${d.ingresosHoy?`\nIngresos extra: ${fmtMoney(d.ingresosHoy)}`:''}\nGastos: ${fmtMoney(d.gastosHoy)}\n\n💵 Caja del periodo: ${fmtMoney(d.caja)}\n📈 Ganancia estimada: ${fmtMoney(d.ganancia)}\n🛒 Compras: ${fmtMoney(d.compras)}`;
+  return `🧾 *${DB.config.negocio}* — Cierre de caja ${d.rango}\n\nVentas: ${d.n} por ${fmtMoney(d.total)}\n• De contado: ${fmtMoney(d.contado)}${metodos?`\n${metodos}`:''}\n• Crédito: ${fmtMoney(d.fiado)}\nAbonos recibidos: ${fmtMoney(d.abonos)}${d.ingresosHoy?`\nIngresos extra: ${fmtMoney(d.ingresosHoy)}`:''}\nGastos: ${fmtMoney(d.gastosHoy)}${d.comprasContado?`\nCompras de contado: −${fmtMoney(d.comprasContado)}`:''}${d.pagosProv?`\nPagos a proveedores: −${fmtMoney(d.pagosProv)}`:''}\n\n💵 Caja del periodo: ${fmtMoney(d.caja)}\n📈 Ganancia estimada: ${fmtMoney(d.ganancia)}\n🛒 Compras: ${fmtMoney(d.compras)}${d.comprasCredito?` (a crédito: ${fmtMoney(d.comprasCredito)})`:''}`;
 }
 function openCierre(desde,hasta){
   const d=cierreDatos(desde,hasta);
@@ -1812,9 +1843,12 @@ function openCierre(desde,hasta){
     +fila('Abonos recibidos',fmtMoney(d.abonos),'text-teal-600')
     +(d.ingresosHoy?fila('Ingresos extra',fmtMoney(d.ingresosHoy),'text-teal-600'):'')
     +fila(d.esHoy?'Gastos del día':'Gastos del periodo',`−${fmtMoney(d.gastosHoy)}`,'text-rose-600')
-    +fila(d.esHoy?'💵 Caja del día':'💵 Caja del periodo',fmtMoney(d.caja),'text-teal-700')
+    +(d.comprasContado?fila('Compras de contado',`−${fmtMoney(d.comprasContado)}`,'text-rose-600'):'')
+    +(d.pagosProv?fila('Pagos a proveedores',`−${fmtMoney(d.pagosProv)}`,'text-rose-600'):'')
+    +fila(d.esHoy?'💵 Caja del día':'💵 Caja del periodo',fmtMoney(d.caja),d.caja<0?'text-rose-600':'text-teal-700')
     +fila('Ganancia estimada',fmtMoney(d.ganancia),'text-brand-700')
     +fila(d.esHoy?'Compras del día':'Compras del periodo',fmtMoney(d.compras))
+    +(d.comprasCredito?`<div class="flex justify-between text-xs py-1 pl-4 text-slate-400"><span>a crédito (no sale de caja hoy)</span><span>${fmtMoney(d.comprasCredito)}</span></div>`:'')
     +`${d.esHoy?`<button onclick="openGasto()" class="w-full mt-3 text-xs text-slate-500 border border-slate-200 rounded-xl py-2 hover:bg-slate-50">💸 Registrar un gasto de hoy</button>`:''}
      <div class="flex gap-2 mt-2">
        <button onclick="window.open('https://wa.me/?text='+encodeURIComponent(cierreTexto('${d.desde}','${d.hasta}')),'_blank')" class="flex-1 bg-teal-600 hover:bg-teal-700 text-white py-2.5 rounded-xl text-sm font-semibold">📲 WhatsApp</button>
@@ -1988,9 +2022,24 @@ function verCompra(id){
 function delCompra(id){
   if(!confirm('¿Anular esta compra? Se descontará el stock ingresado.'))return;
   const c=DB.compras.find(x=>x.id===id); if(!c)return;
-  c.items.forEach(i=>descontarStock(i.prodId,i.cant));
-  if(c.credito && c.provId){ const p=getProveedor(c.provId); if(p){ p.saldo=Math.max(0,(p.saldo||0)-c.total); p.movs=p.movs||[]; p.movs.push({fecha:todayISO(),tipo:'anulacion',monto:c.total}); } }
-  DB.compras=DB.compras.filter(x=>x.id!==id); store.save(); closeModal(); render(); toast('Compra anulada');
+  // Puede que parte de la mercancia ya se haya vendido: se avisa en vez de fallar en silencio
+  let faltante=0;
+  c.items.forEach(i=>{ faltante += i.cant - descontarStock(i.prodId,i.cant); });
+  let aviso='';
+  if(faltante>0) aviso=` · ojo: faltaron ${faltante} unidad(es) por descontar (ya se vendieron)`;
+  if(c.credito && c.provId){
+    const p=getProveedor(c.provId);
+    if(p){
+      // Solo se revierte lo que aun se le debe; lo ya pagado queda como saldo a favor
+      const aRevertir=Math.min(c.total, p.saldo||0);
+      const yaPagado=c.total-aRevertir;
+      p.saldo=Math.max(0,(p.saldo||0)-aRevertir);
+      p.movs=p.movs||[]; p.movs.push({fecha:todayISO(),tipo:'anulacion',monto:aRevertir});
+      if(yaPagado>0) aviso+=` · ya le habías pagado ${fmtMoney(yaPagado)} a ${esc(p.nombre)}: queda a tu favor`;
+    }
+  }
+  DB.compras=DB.compras.filter(x=>x.id!==id); store.save(); closeModal(); render();
+  toast('Compra anulada'+aviso);
 }
 
 /* ---------- EXCEL: plantilla de cargue masivo, importación y reportes KPI ---------- */
