@@ -232,6 +232,24 @@ const store = {
     [].concat(d.clientes, d.proveedores).forEach(x=>{
       if(!Array.isArray(x.movs)) x.movs=[];
       if(typeof x.saldo!=='number' || isNaN(x.saldo)) x.saldo=0;
+      x.movs.forEach(m=>{ if(!m.id) m.id=uid(); });
+      // Facturas sin `pagado`: son datos anteriores al pago por factura
+      const cargos=x.movs.filter(esCargo);
+      if(cargos.some(m=>m.pagado===undefined)){
+        const yaAplicado=x.movs.some(m=>m.tipo==='abono' && Array.isArray(m.aplicaA) && m.aplicaA.length);
+        if(!yaAplicado){
+          // Se reparten los abonos historicos sobre las facturas, de la mas antigua a la mas nueva
+          cargos.forEach(m=>m.pagado=0);
+          let bolsa=x.movs.filter(esDescargo).reduce((s,m)=>s+(+m.monto||0),0);
+          cargos.slice().sort(porFechaMov).forEach(f=>{
+            if(bolsa<=0) return;
+            const usa=Math.min(+f.monto||0, bolsa);
+            f.pagado=usa; bolsa-=usa;
+          });
+        } else {
+          cargos.forEach(m=>{ if(m.pagado===undefined) m.pagado=0; });
+        }
+      }
     });
     const yaAsignados = d.ventas.map(v=>v.consecutivo).filter(Boolean);
     const maxAsignado = yaAsignados.length ? Math.max(...yaAsignados) : 0;
@@ -465,6 +483,44 @@ const getProducto = id => DB.productos.find(p=>p.id===id);
 const getCliente = id => DB.clientes.find(c=>c.id===id);
 const getProveedor = id => DB.proveedores.find(p=>p.id===id);
 
+/* ---------- Cartera por factura (clientes y proveedores) ----------
+   Cada movimiento de cargo ('credito' en proveedores, 'fiado' en clientes) es una factura
+   y lleva `pagado` = cuanto se le ha abonado. Asi se puede pagar factura por factura. */
+function esCargo(m){ return m.tipo==='credito' || m.tipo==='fiado'; }
+function esDescargo(m){ return m.tipo==='abono' || m.tipo==='anulacion'; }
+function porFechaMov(a,b){ return ((a.fecha||'')+(a.id||'')) < ((b.fecha||'')+(b.id||'')) ? -1 : 1; }
+// Saldo que dicen los movimientos (la verdad contable)
+function saldoCalculado(x){
+  const movs=x.movs||[];
+  const cargos=movs.filter(esCargo).reduce((s,m)=>s+(+m.monto||0),0);
+  const pagos =movs.filter(esDescargo).reduce((s,m)=>s+(+m.monto||0),0);
+  return Math.max(0, cargos-pagos);
+}
+function pendienteDe(mov){ return Math.max(0,(+mov.monto||0)-(+mov.pagado||0)); } // usada por migrar
+// Facturas con saldo pendiente, de la mas antigua a la mas nueva
+function facturasPendientes(x){
+  return (x.movs||[]).filter(m=>esCargo(m) && pendienteDe(m)>0).sort(porFechaMov);
+}
+function etiquetaCargo(m){
+  if(m.numeroFactura) return 'Factura '+m.numeroFactura;
+  if(m.ventaId){ const v=DB.ventas.find(x=>x.id===m.ventaId); if(v) return 'Venta #'+fmtConsec(v.consecutivo); }
+  if(m.compraId) return 'Compra del '+fmtDate(m.fecha);
+  return 'Cargo del '+fmtDate(m.fecha);
+}
+/* Aplica un pago a UNA factura concreta (movId) o, si no se indica,
+   a las facturas mas antiguas primero. Devuelve a que facturas se aplico. */
+function aplicarPago(x, monto, movId){
+  const aplicaA=[]; let resta=monto;
+  const objetivo = movId ? (x.movs||[]).filter(m=>m.id===movId) : facturasPendientes(x);
+  for(const f of objetivo){
+    if(resta<=0) break;
+    const pend=pendienteDe(f); if(pend<=0) continue;
+    const usa=Math.min(pend,resta);
+    f.pagado=(+f.pagado||0)+usa; resta-=usa;
+    aplicaA.push({movId:f.id, etiqueta:etiquetaCargo(f), monto:usa});
+  }
+  return {aplicaA, sobrante:resta};
+}
 // Stock total de un producto = suma de sus lotes
 const stockDe = p => (p.lotes||[]).reduce((s,l)=>s+(+l.cantidad||0),0);
 
@@ -1244,14 +1300,40 @@ function openEstadoCuenta(id){
      <button onclick="waEstadoCuenta('${id}')" class="w-full bg-teal-600 hover:bg-teal-700 text-white font-semibold py-2.5 rounded-xl">📲 Enviar estado de cuenta por WhatsApp</button>`, 'lg');
 }
 function abonar(id){
-  const c=getCliente(id);
-  const val=prompt(`${c.nombre} debe ${fmtMoney(c.saldo)}.\n¿Cuánto abona?`, c.saldo);
-  if(val===null) return; const n=+val; if(isNaN(n)||n<=0) return toast('Monto inválido','err');
-  // El abono no puede exceder la deuda: si no, el saldo y el estado de cuenta dejan de cuadrar
-  if(n > (c.saldo||0)) return toast(`El abono no puede ser mayor a la deuda (${fmtMoney(c.saldo||0)})`,'err');
+  const c=getCliente(id); if(!c) return;
+  const pend=facturasPendientes(c);
+  openModal('💵 Registrar abono',
+    `<div class="mb-3 text-sm text-slate-500"><b>${esc(c.nombre)}</b> debe <b class="text-amber-600">${fmtMoney(c.saldo)}</b>.</div>
+     <form onsubmit="return saveAbono(event,'${id}')">
+      ${field('¿A qué venta / factura?',`<select name="factura" id="cbFactura" onchange="onAbonoFacturaCli('${id}')" class="${inputCls}">
+         <option value="">Toda la deuda (las más antiguas primero)</option>
+         ${pend.map(f=>`<option value="${f.id}">${esc(etiquetaCargo(f))} — pendiente ${fmtMoney(pendienteDe(f))}${f.vence?` · vence ${fmtDate(f.vence)}`:''}</option>`).join('')}
+       </select>`)}
+      ${field('Monto del abono *',`<input name="monto" id="cbMonto" type="number" min="1" step="any" required value="${c.saldo}" class="${inputCls}">`)}
+      ${field('Medio de pago',`<select name="medioPago" class="${inputCls}">${MEDIOS_PAGO.map(m=>`<option value="${m}">${m}</option>`).join('')}</select>`)}
+      <button type="submit" class="w-full bg-brand hover:bg-brand-700 text-white font-semibold py-2.5 rounded-xl">Registrar abono</button>
+     </form>`);
+}
+function onAbonoFacturaCli(id){
+  const c=getCliente(id); if(!c) return;
+  const sel=document.getElementById('cbFactura'), inp=document.getElementById('cbMonto');
+  if(!sel||!inp) return;
+  const f=(c.movs||[]).find(m=>m.id===sel.value);
+  inp.value = f ? pendienteDe(f) : (c.saldo||0);
+}
+function saveAbono(e,id){
+  e.preventDefault(); const f=e.target;
+  const c=getCliente(id); if(!c) return false;
+  const n=+f.monto.value; if(isNaN(n)||n<=0){ toast('Monto inválido','err'); return false; }
+  const movId=(f.factura&&f.factura.value)||'';
+  const fact=movId?(c.movs||[]).find(m=>m.id===movId):null;
+  const tope=fact?pendienteDe(fact):(c.saldo||0);
+  if(n>tope){ toast(`El abono no puede ser mayor a ${fact?'lo pendiente de esa venta':'la deuda'} (${fmtMoney(tope)})`,'err'); return false; }
+  const {aplicaA}=aplicarPago(c,n,movId);
   c.saldo=Math.max(0,(c.saldo||0)-n);
-  c.movs=c.movs||[]; c.movs.push({fecha:todayISO(),tipo:'abono',monto:n});
-  store.save(); render(); if(modal) openCliente(id); toast('Abono registrado');
+  c.movs=c.movs||[]; c.movs.push({id:uid(),fecha:todayISO(),tipo:'abono',monto:n,medioPago:f.medioPago.value,aplicaA});
+  store.save(); closeModal(); render(); toast('Abono registrado');
+  return false;
 }
 
 /* ----- Proveedores (módulo propio, como Clientes) ----- */
@@ -1312,7 +1394,11 @@ function abonarProv(id){
   openModal('💵 Registrar pago a proveedor',
     `<div class="mb-3 text-sm text-slate-500">Le debes <b class="text-rose-600">${fmtMoney(p.saldo)}</b> a <b>${esc(p.nombre)}</b>.</div>
      <form onsubmit="return saveAbonoProv(event,'${id}')">
-      ${field('Monto a pagar *',`<input name="monto" type="number" min="1" step="any" required value="${p.saldo}" class="${inputCls}">`)}
+      ${field('¿A qué factura?',`<select name="factura" id="abFactura" onchange="onAbonoFacturaProv('${id}')" class="${inputCls}">
+         <option value="">Toda la deuda (las más antiguas primero)</option>
+         ${facturasPendientes(p).map(f=>`<option value="${f.id}">${esc(etiquetaCargo(f))} — pendiente ${fmtMoney(pendienteDe(f))}${f.vence?` · vence ${fmtDate(f.vence)}`:''}</option>`).join('')}
+       </select>`)}
+      ${field('Monto a pagar *',`<input name="monto" id="abMonto" type="number" min="1" step="any" required value="${p.saldo}" class="${inputCls}">`)}
       ${field('Medio de pago',`<select name="medioPago" class="${inputCls}">${MEDIOS_PAGO.map(m=>`<option value="${m}">${m}</option>`).join('')}</select>`)}
       <label class="block mb-3"><span class="text-xs font-medium text-slate-500">Soporte de pago (comprobante) *</span>
         <div id="abSoporteArea" class="mt-1">${adjuntoAreaInner(abonoSoporteTmp,'soporte de pago','quitarAbonoSoporte()','abSoporteFile','onAbonoSoporte(this)')}</div>
@@ -1320,16 +1406,28 @@ function abonarProv(id){
       <button type="submit" class="w-full bg-brand hover:bg-brand-700 text-white font-semibold py-2.5 rounded-xl">Registrar pago</button>
      </form>`);
 }
+// Al elegir una factura, el monto se ajusta a lo que falta de esa factura
+function onAbonoFacturaProv(id){
+  const p=getProveedor(id); if(!p) return;
+  const sel=document.getElementById('abFactura'), inp=document.getElementById('abMonto');
+  if(!sel||!inp) return;
+  const f=(p.movs||[]).find(m=>m.id===sel.value);
+  inp.value = f ? pendienteDe(f) : (p.saldo||0);
+}
 function saveAbonoProv(e,id){
   e.preventDefault(); const f=e.target;
   const p=getProveedor(id); if(!p) return false;
   const n=+f.monto.value; if(isNaN(n)||n<=0){ toast('Monto inválido','err'); return false; }
-  // El pago no puede exceder la deuda: si no, el saldo y el estado de cuenta dejan de cuadrar
-  if(n > (p.saldo||0)){ toast(`El pago no puede ser mayor a la deuda (${fmtMoney(p.saldo||0)})`,'err'); return false; }
+  const movId=(f.factura&&f.factura.value)||'';
+  const fact=movId?(p.movs||[]).find(m=>m.id===movId):null;
+  // El pago no puede exceder lo que se debe: si no, el saldo y el estado de cuenta dejan de cuadrar
+  const tope=fact?pendienteDe(fact):(p.saldo||0);
+  if(n>tope){ toast(`El pago no puede ser mayor a ${fact?'lo pendiente de esa factura':'la deuda'} (${fmtMoney(tope)})`,'err'); return false; }
   if(!abonoSoporteTmp.data){ toast('Adjunta el soporte de pago antes de registrar','err'); return false; }
   const medioPago=f.medioPago.value;
+  const {aplicaA}=aplicarPago(p,n,movId);
   p.saldo=Math.max(0,(p.saldo||0)-n);
-  p.movs=p.movs||[]; p.movs.push({fecha:todayISO(),tipo:'abono',monto:n,medioPago,soporte:{...abonoSoporteTmp}});
+  p.movs=p.movs||[]; p.movs.push({id:uid(),fecha:todayISO(),tipo:'abono',monto:n,medioPago,soporte:{...abonoSoporteTmp},aplicaA});
   abonoSoporteTmp={name:'',tipo:'',data:''};
   store.save(); closeModal(); render(); toast('Pago registrado');
   return false;
@@ -1361,13 +1459,15 @@ function openEstadoCuentaProv(id){
         if(m.tipo==='credito'){
           const prods=(m.items||[]).map(esc).join(', ');
           return `<div class="border-b border-slate-100 pb-2">
-            <div class="flex justify-between text-sm"><span class="font-medium">${fmtDate(m.fecha)} · Compra a crédito${m.vence?` <span class="text-xs text-rose-600 font-normal">· pagar antes del ${fmtDate(m.vence)}</span>`:''}</span><span class="font-semibold text-rose-600">+${fmtMoney(m.monto)}</span></div>
+            <div class="flex justify-between text-sm"><span class="font-medium">${esc(etiquetaCargo(m))}${m.vence?` <span class="text-xs text-rose-600 font-normal">· pagar antes del ${fmtDate(m.vence)}</span>`:''}</span><span class="font-semibold text-rose-600">+${fmtMoney(m.monto)}</span></div>
+            <div class="text-xs mt-0.5 ${pendienteDe(m)>0?'text-rose-600 font-medium':'text-teal-600 font-medium'}">${pendienteDe(m)>0?`Pendiente: ${fmtMoney(pendienteDe(m))}`:'✓ Pagada'}${(+m.pagado||0)>0&&pendienteDe(m)>0?` · abonado ${fmtMoney(m.pagado)}`:''}</div>
             ${prods?`<div class="text-xs text-slate-400 mt-0.5">${prods}</div>`:''}
           </div>`;
         }
         if(m.tipo==='abono'){
           return `<div class="border-b border-slate-100 pb-2">
             <div class="flex justify-between text-sm"><span>${fmtDate(m.fecha)} · Pago realizado${m.medioPago?` <span class="text-xs text-slate-400 font-normal">· ${esc(m.medioPago)}</span>`:''}</span><span class="font-semibold text-teal-600">−${fmtMoney(m.monto)}</span></div>
+            ${(m.aplicaA&&m.aplicaA.length)?`<div class="text-xs text-slate-400 mt-0.5">Aplicado a: ${m.aplicaA.map(a=>`${esc(a.etiqueta)} (${fmtMoney(a.monto)})`).join(', ')}</div>`:''}
             ${m.soporte&&m.soporte.data?`<div class="mt-0.5">${m.soporte.tipo&&m.soporte.tipo.startsWith('image/')?`<a href="${m.soporte.data}" target="_blank" class="text-xs text-brand-700 font-medium">📎 Ver soporte</a>`:`<a href="${m.soporte.data}" download="${esc(m.soporte.name||'soporte.pdf')}" class="text-xs text-brand-700 font-medium">📎 Descargar soporte</a>`}</div>`:''}
           </div>`;
         }
@@ -1530,7 +1630,7 @@ function confirmVenta(){
   if(fiado && clienteId){
     const c=getCliente(clienteId); c.saldo=(c.saldo||0)+total; c.movs=c.movs||[];
     const items = carritoV.map(i=>({nombre:getProducto(i.prodId)?.nombre||'(producto)', cant:i.cant}));
-    c.movs.push({fecha:todayISO(),tipo:'fiado',monto:total,ventaId:venta.id,items,plazoMeses,vence:venceCredito});
+    c.movs.push({id:uid(),fecha:todayISO(),tipo:'fiado',monto:total,pagado:0,ventaId:venta.id,items,plazoMeses,vence:venceCredito});
   }
   store.save(); closeModal(); render(); toast('Venta registrada ✔');
   verVenta(venta.id); // muestra el recibo con opciones de WhatsApp/imprimir
@@ -1859,6 +1959,44 @@ function openCierre(desde,hasta){
 function printCierre(desde,hasta){ printTicket(cierreTexto(desde,hasta)); }
 function imagenCierre(desde,hasta){ ticketImagen(cierreTexto(desde,hasta), 'cierre-'+(desde||todayISO())); }
 
+/* ---------- Cuadre de cartera ----------
+   Compara el saldo guardado contra el que dicen los movimientos y permite repararlo. */
+function revisarCuadre(){
+  const problemas=[];
+  const revisar=(lista,tipo)=>lista.forEach(x=>{
+    const calc=saldoCalculado(x), guardado=+x.saldo||0;
+    // Tolerancia de 1 peso por redondeos
+    if(Math.abs(calc-guardado)>1) problemas.push({tipo, id:x.id, nombre:x.nombre, guardado, calc, dif:guardado-calc});
+  });
+  revisar(DB.clientes||[],'cliente');
+  revisar(DB.proveedores||[],'proveedor');
+  return problemas;
+}
+function openCuadre(){
+  const probs=revisarCuadre();
+  openModal('🧮 Cuadre de cartera',
+    probs.length
+    ? `<p class="text-sm text-slate-500 mb-3">Estos saldos no coinciden con su historial de movimientos. Al cuadrar, el saldo pasa a ser el que dicen los movimientos.</p>
+       <div class="space-y-2 max-h-80 overflow-y-auto mb-4">${probs.map(x=>`
+         <div class="card p-3">
+           <div class="font-semibold text-sm">${esc(x.nombre)} <span class="text-xs font-normal text-slate-400">· ${x.tipo}</span></div>
+           <div class="flex justify-between text-xs mt-1"><span class="text-slate-500">Saldo guardado</span><span class="font-medium">${fmtMoney(x.guardado)}</span></div>
+           <div class="flex justify-between text-xs"><span class="text-slate-500">Según movimientos</span><span class="font-medium text-brand-700">${fmtMoney(x.calc)}</span></div>
+           <div class="flex justify-between text-xs"><span class="text-slate-500">Diferencia</span><span class="font-semibold ${x.dif>0?'text-rose-600':'text-amber-600'}">${x.dif>0?'+':''}${fmtMoney(x.dif)}</span></div>
+         </div>`).join('')}</div>
+       <button onclick="aplicarCuadre()" class="w-full bg-brand hover:bg-brand-700 text-white font-semibold py-2.5 rounded-xl">Cuadrar ${probs.length} saldo(s)</button>`
+    : `<div class="text-center py-8"><div class="text-4xl mb-2">✅</div><p class="text-sm text-slate-500">Todo cuadrado: los saldos coinciden con los movimientos.</p></div>`);
+}
+function aplicarCuadre(){
+  const probs=revisarCuadre();
+  if(!probs.length) return toast('No hay nada que cuadrar');
+  probs.forEach(x=>{
+    const ent = x.tipo==='cliente' ? getCliente(x.id) : getProveedor(x.id);
+    if(ent) ent.saldo=saldoCalculado(ent);
+  });
+  store.save(); render(); openCuadre(); toast(`${probs.length} saldo(s) cuadrado(s)`);
+}
+
 /* ----- Compra ----- */
 let carritoC=[];
 function openCompra(){ carritoC=[]; compraFacturaTmp={name:'',tipo:'',data:''}; openModal('Nueva compra', compraBody(), 'lg'); }
@@ -2004,7 +2142,7 @@ function confirmCompra(){
   if(credito && prov){
     prov.saldo=(prov.saldo||0)+total; prov.movs=prov.movs||[];
     const nombres=items.map(i=>`${getProducto(i.prodId)?.nombre||'(producto)'} x${i.cant}`);
-    prov.movs.push({fecha:todayISO(),tipo:'credito',monto:total,compraId:compra.id,items:nombres,plazoMeses,vence:venceCredito,numeroFactura});
+    prov.movs.push({id:uid(),fecha:todayISO(),tipo:'credito',monto:total,pagado:0,compraId:compra.id,items:nombres,plazoMeses,vence:venceCredito,numeroFactura});
   }
   compraFacturaTmp={name:'',tipo:'',data:''};
   store.save(); closeModal(); render(); toast('Compra registrada ✔');
@@ -2256,6 +2394,10 @@ function openConfig(){
        ${field('Letra del ticket',`<select id="cfgCPL" class="${inputCls}">${CPL_OPCIONES.map(o=>`<option value="${o.v}"${ticketCPL()===o.v?' selected':''}>${o.t} (${o.v} caracteres)</option>`).join('')}</select>`)}
      </div>
      <button onclick="saveConfig()" class="w-full bg-brand text-white font-semibold py-2.5 rounded-xl mb-4">Guardar ajustes</button>
+     <div class="border-t border-slate-100 pt-4 mb-4">
+       <p class="text-xs text-slate-400 mb-2">Cartera (clientes y proveedores)</p>
+       <button onclick="openCuadre()" class="w-full border border-slate-200 rounded-xl py-2.5 text-sm hover:bg-slate-50">🧮 Revisar y cuadrar saldos</button>
+     </div>
      <div class="border-t border-slate-100 pt-4 mb-4">
        <p class="text-xs text-slate-400 mb-2">Cargue masivo de inventario (Excel)</p>
        <div class="flex gap-2">
