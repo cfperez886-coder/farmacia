@@ -1540,7 +1540,6 @@ function showVenta(){ openModal('Nueva venta', ventaBody(), 'lg'); }
 function ventaBody(){
   const total=carritoV.reduce((s,i)=>s+i.cant*i.precio,0);
   const disponibles=DB.productos.filter(p=>stockDe(p)>0);
-  const opts=disponibles.map(p=>`<option value="${p.id}">${esc(p.nombre)} — ${fmtMoney(p.precioVenta)} (${stockDe(p)} ${esc(p.unidad||'u')})</option>`).join('');
   const clOpts=DB.clientes.map(c=>`<option value="${c.id}">${esc(c.nombre)}</option>`).join('');
   if(!disponibles.length){
     return `<div class="text-center py-8">
@@ -1554,7 +1553,13 @@ function ventaBody(){
   }
   return `
     <div class="flex gap-2 mb-1">
-      <select id="vProd" onchange="onProdVentaChange()" aria-label="Producto a agregar" class="${inputCls} flex-1"><option value="">Agregar producto…</option>${opts}</select>
+      <div class="relative flex-1">
+        <input id="vBuscarProd" autocomplete="off" placeholder="Buscar medicamento…" aria-label="Buscar producto"
+               oninput="ventaProdFilter()" onfocus="ventaProdFilter()" onblur="ventaProdBlur()" onkeydown="ventaProdTecla(event)"
+               class="${inputCls}">
+        <input type="hidden" id="vProd" value="">
+        <div id="vProdDrop" class="hidden absolute z-30 left-0 right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-xl max-h-60 overflow-y-auto"></div>
+      </div>
       <input id="vCant" type="number" min="1" value="1" class="${inputCls} w-16" title="Cantidad" aria-label="Cantidad">
     </div>
     <div class="flex gap-2 mb-3">
@@ -1597,6 +1602,51 @@ function actualizarPlazoInfo(){
   const m=Math.max(1,+($('#vPlazo')?.value)||1);
   el.textContent='Fecha límite de pago: '+fmtDate(addMonths(todayISO(),m));
 }
+/* ---------- Buscador de productos en la venta ----------
+   Con muchos medicamentos un desplegable es incomodo: se busca escribiendo.
+   El id elegido queda en el input oculto #vProd (lo lee addCarrito). */
+let ventaMatches=[];
+function ventaProdFilter(){
+  const inp=document.getElementById('vBuscarProd'), drop=document.getElementById('vProdDrop');
+  if(!inp||!drop) return;
+  const q=inp.value.trim().toLowerCase();
+  // Si el texto ya no corresponde al producto elegido, se descarta la seleccion
+  const sel=getProducto(($('#vProd')||{}).value||'');
+  if(sel && inp.value!==sel.nombre) $('#vProd').value='';
+  ventaMatches=DB.productos.filter(p=>stockDe(p)>0)
+    .filter(p=> !q || p.nombre.toLowerCase().includes(q) || (p.categoria||'').toLowerCase().includes(q)
+                 || (p.lotes||[]).some(l=>(l.lote||'').toLowerCase().includes(q)))
+    .sort((a,b)=>a.nombre.localeCompare(b.nombre)).slice(0,60);
+  if(!ventaMatches.length){
+    drop.innerHTML=`<div class="px-3 py-2 text-sm text-slate-400">Sin resultados con existencias</div>`;
+    drop.classList.remove('hidden'); return;
+  }
+  drop.innerHTML=ventaMatches.map((p,i)=>`
+    <button type="button" onmousedown="ventaProdPick(${i})" class="w-full text-left px-3 py-2 text-sm hover:bg-brand-50 border-b border-slate-50 last:border-0 flex items-center justify-between gap-2">
+      <span class="min-w-0"><span class="block truncate font-medium">${esc(p.nombre)}</span>
+        <span class="block text-xs text-slate-400 truncate">${esc(p.categoria||'Sin categoría')}</span></span>
+      <span class="shrink-0 text-right"><span class="block font-semibold">${fmtMoney(p.precioVenta)}</span>
+        <span class="block text-xs ${stockDe(p)<=DB.config.alertaStock?'text-amber-600':'text-slate-400'}">${stockDe(p)} ${esc(p.unidad||'u')}</span></span>
+    </button>`).join('');
+  drop.classList.remove('hidden');
+}
+function ventaProdPick(i){
+  const p=ventaMatches[i]; if(!p) return;
+  const inp=document.getElementById('vBuscarProd'), drop=document.getElementById('vProdDrop');
+  if(inp) inp.value=p.nombre;
+  if($('#vProd')) $('#vProd').value=p.id;
+  if(drop) drop.classList.add('hidden');
+  onProdVentaChange();                       // autocompleta el precio
+  const c=document.getElementById('vCant'); if(c){ c.focus(); c.select(); }
+}
+// Enter elige el primero de la lista (para vender rapido sin soltar el teclado)
+function ventaProdTecla(e){
+  if(e.key!=='Enter') return;
+  e.preventDefault();
+  const drop=document.getElementById('vProdDrop');
+  if(drop && !drop.classList.contains('hidden') && ventaMatches.length) ventaProdPick(0);
+}
+function ventaProdBlur(){ setTimeout(()=>{ const d=document.getElementById('vProdDrop'); if(d) d.classList.add('hidden'); }, 150); }
 function onProdVentaChange(){
   const id=$('#vProd').value; const p=getProducto(id);
   $('#vPrecio').value = p ? p.precioVenta : '';
