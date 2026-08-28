@@ -1632,6 +1632,7 @@ function confirmVenta(){
     const items = carritoV.map(i=>({nombre:getProducto(i.prodId)?.nombre||'(producto)', cant:i.cant}));
     c.movs.push({id:uid(),fecha:todayISO(),tipo:'fiado',monto:total,pagado:0,ventaId:venta.id,items,plazoMeses,vence:venceCredito});
   }
+  carritoV=[];                       // el carrito ya se convirtio en venta
   store.save(); closeModal(); render(); toast('Venta registrada ✔');
   verVenta(venta.id); // muestra el recibo con opciones de WhatsApp/imprimir
 }
@@ -2145,6 +2146,7 @@ function confirmCompra(){
     prov.movs.push({id:uid(),fecha:todayISO(),tipo:'credito',monto:total,pagado:0,compraId:compra.id,items:nombres,plazoMeses,vence:venceCredito,numeroFactura});
   }
   compraFacturaTmp={name:'',tipo:'',data:''};
+  carritoC=[];                       // el carrito ya se convirtio en compra
   store.save(); closeModal(); render(); toast('Compra registrada ✔');
 }
 function verCompra(id){
