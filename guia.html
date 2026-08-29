@@ -175,6 +175,28 @@ footer b{ color:var(--ink) }
   html{ scroll-behavior:auto }
   .reveal{ opacity:1; transform:none; transition:none }
 }
+
+/* ---- extras (guía v2: proveedores, cartera por factura, impresión térmica) ---- */
+.req{ color:#be123c; font-weight:900 }
+.attach{ background:#eef6ff; border:1px dashed #9dbdf0; border-radius:8px; padding:7px 8px; font-size:.58rem; color:#1d3a8a; font-weight:800; text-align:center }
+.drop{ background:#fff; border:1px solid #dde4f0; border-radius:8px; margin-top:-3px; overflow:hidden }
+.drop .o{ display:flex; justify-content:space-between; align-items:center; gap:6px; padding:5px 8px; border-bottom:1px solid #f1f4f9; font-size:.6rem }
+.drop .o:last-child{ border-bottom:0 }
+.drop .o.sel{ background:#eef6ff }
+.drop .o .n{ font-weight:800 }
+.drop .o .c{ color:#8a93a6; font-size:.52rem }
+.drop .o .p{ font-weight:800; text-align:right }
+.drop .o .s{ color:#8a93a6; font-size:.52rem; text-align:right }
+.ticketpaper{ width:152px; margin:0 auto; background:#fff; border:1px solid #e6e9f0; border-radius:3px; padding:10px 9px; font-family:ui-monospace,'Courier New',monospace; font-size:.5rem; line-height:1.55; color:#0b1120; box-shadow:0 12px 24px -16px rgba(15,24,48,.7) }
+.ticketpaper .c{ text-align:center; font-weight:800 }
+.ticketpaper .sep{ border-top:1px dashed #c9d1de; margin:5px 0 }
+.ticketpaper .lr{ display:flex; justify-content:space-between; gap:8px }
+.miniflow{ display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-top:28px; max-width:940px }
+.miniflow .mf{ background:var(--card); border:1px solid var(--line); border-radius:15px; padding:15px 16px; box-shadow:var(--shadow) }
+.miniflow .mf .k{ font-family:var(--serif); font-weight:600; color:var(--brand); font-size:1.3rem; line-height:1 }
+.miniflow .mf h5{ margin:9px 0 4px; font-size:.94rem; letter-spacing:-.01em }
+.miniflow .mf p{ margin:0; font-size:.83rem; color:var(--muted); line-height:1.5 }
+@media (max-width:860px){ .miniflow{ grid-template-columns:1fr 1fr } }
 </style>
 <body>
 <div class="progress" id="prog"></div>
@@ -187,9 +209,9 @@ footer b{ color:var(--ink) }
     </div>
     <nav class="chips">
       <a href="#inicio">Inicio</a><a href="#ventas">Ventas</a><a href="#compras">Compras</a>
-      <a href="#inventario">Inventario</a><a href="#clientes">Clientes</a><a href="#vencimientos">Vencimientos</a>
-      <a href="#reportes">Reportes</a><a href="#gastos">Gastos</a><a href="#cierre">Cierre</a>
-      <a href="#nube">Nube</a><a href="#ajustes">Ajustes</a>
+      <a href="#inventario">Inventario</a><a href="#clientes">Clientes</a><a href="#proveedores">Proveedores</a>
+      <a href="#vencimientos">Vencimientos</a><a href="#reportes">Reportes</a><a href="#gastos">Gastos</a>
+      <a href="#cierre">Cierre</a><a href="#impresion">Impresión</a><a href="#nube">Nube</a><a href="#ajustes">Ajustes</a>
     </nav>
   </div>
 </header>
@@ -199,11 +221,12 @@ footer b{ color:var(--ink) }
   <section class="hero">
     <span class="kicker">📘 Manual del usuario</span>
     <h1>Cómo usar Farmifer</h1>
-    <p class="dek">Todo lo que necesitas para vender, controlar tu inventario y cobrar deudas — desde el celular, ahí mismo en el mostrador. Te lo mostramos <em>pantalla por pantalla</em>, en el mismo orden del menú de tu app.</p>
+    <p class="dek">Todo lo que necesitas para vender, controlar tu inventario, cobrar deudas y pagarle a tus proveedores — desde el celular, ahí mismo en el mostrador. Te lo mostramos <em>pantalla por pantalla</em>, en el mismo orden del menú de tu app.</p>
     <div class="hero-meta">
       <span class="pill">🔗 <b>farmifer.vercel.app</b></span>
       <span class="pill">☁️ Sincroniza con la nube</span>
       <span class="pill">📶 Funciona sin internet</span>
+      <span class="pill">🖨️ Imprime en térmica de 58 mm</span>
       <span class="pill">🌙 Tema claro / oscuro</span>
     </div>
     <div class="onboard">
@@ -220,39 +243,43 @@ footer b{ color:var(--ink) }
     <div class="chapter__head">
       <div class="chapter__idx">01</div>
       <div class="chapter__ic">🏠</div>
-      <div class="chapter__ttl"><h2>Inicio</h2><p>El resumen del día: cuánto has vendido, quién te debe y qué necesita tu atención.</p></div>
+      <div class="chapter__ttl"><h2>Inicio</h2><p>El resumen del día: cuánto has vendido, quién te debe, a quién le debes y qué necesita tu atención.</p></div>
     </div>
     <div class="grid">
       <div class="phone-col"><div class="phone"><div class="phone__screen">
-        <div class="p-top"><div class="b"><span class="x">💊</span>Mi Negocio</div><div class="a">🌙 ⚙️</div></div>
+        <div class="p-top"><div class="b"><span class="x">💊</span>Mi Negocio</div><div class="a">🌙 ☁️ ⚙️</div></div>
         <div class="p-view">
-          <div class="scr__h"><div><h4>Hola 👋</h4><div class="sub">viernes, 17 de julio</div></div>
-            <div style="display:flex;gap:5px"><span class="sbtn gho">🧾 Cierre</span><span class="sbtn pri">+ Venta<span class="chipnum">3</span></span></div></div>
+          <div class="scr__h"><div><h4>Hola 👋</h4><div class="sub">viernes, 28 de agosto</div></div>
+            <div style="display:flex;gap:5px"><span class="sbtn gho">🧾 Cierre</span><span class="sbtn pri">+ Venta<span class="chipnum">4</span></span></div></div>
           <div class="kpis">
             <div class="kpi"><div class="l">Ventas de hoy</div><div class="v good">$52.000</div></div>
             <div class="kpi"><div class="l">Ventas del mes</div><div class="v">$164.000</div></div>
-            <div class="kpi"><div class="l">Por cobrar<span class="chipnum">1</span></div><div class="v warn">$45.000</div></div>
+            <div class="kpi"><div class="l">Por cobrar<span class="chipnum">2</span></div><div class="v warn">$45.000</div></div>
             <div class="kpi"><div class="l">Inventario</div><div class="v">$2.370.500</div></div>
           </div>
+          <div class="panel" style="margin-bottom:6px"><div class="ph"><span>🔔 Créditos por vencer<span class="chipnum">1</span></span></div>
+            <div class="row"><span>María Fernanda · venta #012</span><b style="color:#be123c">vence hoy</b></div>
+            <div class="row"><span>Distrib. Farmacol · FE-0912</span><b style="color:#b45309">en 3 días</b></div></div>
           <div class="card2">
             <div class="panel"><div class="ph"><span>⏰ Por vencer</span><span style="color:#2563eb">Ver</span></div>
               <div class="row"><span>DOLIREN ·5u</span><b style="color:#be123c">Vencido</b></div>
               <div class="row"><span>ESOMEP. ·8u</span><b style="color:#b45309">3d</b></div></div>
-            <div class="panel"><div class="ph"><span>⚠️ Stock bajo</span><span style="color:#2563eb">Pedido<span class="chipnum">2</span></span></div>
+            <div class="panel"><div class="ph"><span>⚠️ Stock bajo</span><span style="color:#2563eb">Pedido<span class="chipnum">3</span></span></div>
               <div class="row"><span>EUTIROX</span><b>3 u</b></div>
               <div class="row"><span>JARDIANCE</span><b>2 u</b></div></div>
           </div>
         </div>
-        <div class="p-tabs"><div class="t on"><span class="i">🏠</span>Inicio</div><div class="t"><span class="i">💵</span>Ventas</div><div class="t"><span class="i">🛒</span>Compras</div><div class="t"><span class="i">📦</span>Invent.</div><div class="t"><span class="i">👥</span>Client.</div><div class="t"><span class="i">⏰</span>Vence</div><div class="t"><span class="i">📊</span>Report.</div></div>
+        <div class="p-tabs"><div class="t on"><span class="i">🏠</span>Inicio</div><div class="t"><span class="i">💵</span>Ventas</div><div class="t"><span class="i">📦</span>Invent.</div><div class="t"><span class="i">👥</span>Client.</div><div class="t"><span class="i">⋯</span>Más</div></div>
         <div class="p-home"><span></span></div>
       </div></div></div>
       <div class="steps-col"><ol class="steps" style="list-style:none;margin:0;padding:0">
-        <li class="step"><div class="num">1</div><div><h4>Por cobrar (fiado)</h4><p>Cuánto te deben en total tus clientes fiados — toca el número para ir directo a Clientes.</p></div></li>
-        <li class="step"><div class="num">2</div><div><h4>Pedido sugerido</h4><p>Abre la lista de lo que se está agotando, con la cantidad recomendada para pedirle a tu proveedor.</p></div></li>
-        <li class="step"><div class="num">3</div><div><h4>+ Nueva venta</h4><p>El botón más usado: abre el carrito para registrar una venta en segundos.</p></div></li>
+        <li class="step"><div class="num">1</div><div><h4>🔔 Créditos por vencer</h4><p>Avisa cuando una venta a crédito o una factura de proveedor está a 5 días o menos de su fecha límite (o ya se venció). Toca cualquiera y te lleva directo al estado de cuenta.</p></div></li>
+        <li class="step"><div class="num">2</div><div><h4>Por cobrar</h4><p>Cuánto te deben en total tus clientes a crédito — toca el número para ir directo a Clientes.</p></div></li>
+        <li class="step"><div class="num">3</div><div><h4>Pedido sugerido</h4><p>Abre la lista de lo que se está agotando, con la cantidad recomendada para pedirle a tu proveedor.</p></div></li>
+        <li class="step"><div class="num">4</div><div><h4>+ Nueva venta</h4><p>El botón más usado: abre el carrito para registrar una venta en segundos.</p></div></li>
       </ol></div>
     </div>
-    <div class="tipcard"><span class="bulb">💡</span><div><b>Revísala cada mañana:</b> en 5 segundos sabes si algo vence pronto, si algo se está agotando o si alguien te debe.</div></div>
+    <div class="tipcard"><span class="bulb">💡</span><div><b>La barra de abajo tiene 5 botones:</b> Inicio, Ventas, Inventario, Clientes y <b>“⋯ Más”</b>. En “Más” están Compras, Proveedores, Vencimientos y Reportes, además de Nube, Tema y Ajustes. En computador se ven los 8 módulos en la barra lateral.</div></div>
   </section>
 
   <!-- 02 VENTAS -->
@@ -260,31 +287,36 @@ footer b{ color:var(--ink) }
     <div class="chapter__head">
       <div class="chapter__idx">02</div>
       <div class="chapter__ic">💵</div>
-      <div class="chapter__ttl"><h2>Ventas</h2><p>Registra cada venta, cobra por el medio que uses y descuenta el inventario solo.</p></div>
+      <div class="chapter__ttl"><h2>Ventas</h2><p>Registra cada venta buscando el producto por su nombre, cobra por el medio que uses y descuenta el inventario solo.</p></div>
     </div>
     <div class="grid">
       <div class="phone-col"><div class="phone"><div class="phone__screen">
-        <div class="p-top"><div class="b"><span class="x">💊</span>Mi Negocio</div><div class="a">🌙 ⚙️</div></div>
+        <div class="p-top"><div class="b"><span class="x">💊</span>Mi Negocio</div><div class="a">🌙 ☁️ ⚙️</div></div>
         <div class="p-view">
           <div class="scr__h"><div><h4>Nueva venta</h4><div class="sub">se registrará como venta #014</div></div></div>
-          <div class="fld"><span class="fl">Buscar producto<span class="chipnum">1</span></span><div class="finput">DOLIREN CJ X 100 TAB — $12.500</div></div>
+          <div class="fld"><span class="fl">Buscar medicamento…<span class="chipnum">1</span></span><div class="finput">doli</div></div>
+          <div class="drop" style="margin-bottom:6px">
+            <div class="o sel"><span><span class="n">DOLIREN CJ X 100 TAB</span><br><span class="c">Medicamento</span></span><span><span class="p">$12.500</span><br><span class="s">24 u</span></span></div>
+            <div class="o"><span><span class="n">DOLOFEN 400 MG</span><br><span class="c">Analgésico</span></span><span><span class="p">$8.900</span><br><span class="s" style="color:#b45309">3 u</span></span></div>
+          </div>
           <div class="fld"><span class="fl">Precio de venta (editable)<span class="chipnum">2</span></span><div class="finput">$11.500</div></div>
           <div class="lrow" style="margin-bottom:6px"><div><div class="t1">DOLIREN CJ X 100 TAB</div><div class="t2">1 × $11.500 · <span style="color:#b45309;font-weight:800">precio especial</span></div></div><div class="amt">$11.500</div></div>
           <div class="fld"><span class="fl">Método de pago<span class="chipnum">3</span></span><div class="finput">💳 Nequi</div></div>
-          <div class="fld"><span class="fl">Cliente (opcional)</span><div class="finput">Sin cliente · ☐ Venta fiada</div></div>
-          <div class="sbtn teal" style="width:100%;justify-content:center;padding:8px">Registrar venta · $11.500<span class="chipnum">4</span></div>
+          <div class="fld"><span class="fl">Cliente (opcional)<span class="chipnum">4</span></span><div class="finput">María Fernanda · ☑ Venta a crédito · 1 mes</div></div>
+          <div class="sbtn teal" style="width:100%;justify-content:center;padding:8px">Registrar venta · $11.500<span class="chipnum">5</span></div>
         </div>
-        <div class="p-tabs"><div class="t"><span class="i">🏠</span>Inicio</div><div class="t on"><span class="i">💵</span>Ventas</div><div class="t"><span class="i">🛒</span>Compras</div><div class="t"><span class="i">📦</span>Invent.</div><div class="t"><span class="i">👥</span>Client.</div><div class="t"><span class="i">⏰</span>Vence</div><div class="t"><span class="i">📊</span>Report.</div></div>
+        <div class="p-tabs"><div class="t"><span class="i">🏠</span>Inicio</div><div class="t on"><span class="i">💵</span>Ventas</div><div class="t"><span class="i">📦</span>Invent.</div><div class="t"><span class="i">👥</span>Client.</div><div class="t"><span class="i">⋯</span>Más</div></div>
         <div class="p-home"><span></span></div>
       </div></div></div>
       <div class="steps-col"><ol class="steps" style="list-style:none;margin:0;padding:0">
-        <li class="step"><div class="num">1</div><div><h4>Buscar producto</h4><p>Escribe el nombre, ajusta la cantidad y agrégalo al carrito. Solo aparecen productos con existencias.</p></div></li>
+        <li class="step"><div class="num">1</div><div><h4>Busca el medicamento</h4><p>Escribe unas letras del <b>nombre</b>, de la <b>categoría</b> o del <b>número de lote</b> y aparece la lista con precio y existencias. Solo salen productos que tienes en stock. Con <b>Enter</b> eliges el primero y el cursor salta a la cantidad — para vender sin soltar el teclado.</p></div></li>
         <li class="step"><div class="num">2</div><div><h4>Precio editable</h4><p>Se llena solo con el precio de catálogo, pero puedes cambiarlo para dar un descuento o tarifa especial. El carrito lo marca como <b>“precio especial”</b> para que el cierre de caja cuadre con lo que de verdad cobraste.</p></div></li>
-        <li class="step"><div class="num">3</div><div><h4>Método de pago</h4><p>Efectivo, Nequi, Daviplata, Tarjeta o Transferencia — o marca “Venta fiada” si el cliente paga después.</p></div></li>
-        <li class="step"><div class="num">4</div><div><h4>Registrar venta</h4><p>Descuenta el stock, asigna un número consecutivo (#001, #002…) y abre el recibo, listo para WhatsApp o imprimir.</p></div></li>
+        <li class="step"><div class="num">3</div><div><h4>Método de pago</h4><p>Efectivo, Nequi, Daviplata, Tarjeta o Transferencia. En el cierre del día verás cuánto entró por cada medio.</p></div></li>
+        <li class="step"><div class="num">4</div><div><h4>Venta a crédito</h4><p>Elige el cliente y marca <b>“Venta a crédito”</b>: el total queda como deuda en su ficha. Se pide el <b>plazo en meses</b> (viene el que tenga configurado el cliente) y la app calcula la fecha límite — “pagar antes del…” — que después te recuerda en Inicio.</p></div></li>
+        <li class="step"><div class="num">5</div><div><h4>Registrar venta</h4><p>Descuenta el stock del lote que vence primero, asigna un número consecutivo (#001, #002…) y abre el recibo, listo para WhatsApp o para imprimir.</p></div></li>
       </ol></div>
     </div>
-    <div class="tipcard"><span class="bulb">💡</span><div><b>Venta fiada:</b> si la marcas, el total queda como deuda en la ficha del cliente automáticamente. Y desde el listado de Ventas puedes filtrar por fecha y descargar un reporte en Excel con el resumen (KPI) y el detalle de cada venta.</div></div>
+    <div class="tipcard"><span class="bulb">💡</span><div><b>Nunca vas a vender más de lo que tienes:</b> la app respeta el stock real, incluso sumando lo que ya llevas en el carrito. Y desde el listado de Ventas puedes filtrar por fecha y descargar un reporte en Excel con el resumen (KPI) y el detalle de cada venta.</div></div>
   </section>
 
   <!-- 03 COMPRAS -->
@@ -292,30 +324,37 @@ footer b{ color:var(--ink) }
     <div class="chapter__head">
       <div class="chapter__idx">03</div>
       <div class="chapter__ic">🛒</div>
-      <div class="chapter__ttl"><h2>Compras</h2><p>Registra la mercancía que te llega del proveedor, con su lote y fecha de vencimiento — eligiendo de <b>todo</b> tu catálogo, lo tengas o no en inventario.</p></div>
+      <div class="chapter__ttl"><h2>Compras</h2><p>Registra la mercancía que te llega, con su factura, lote y vencimiento — eligiendo de <b>todo</b> tu catálogo, lo tengas o no en inventario.</p></div>
     </div>
     <div class="grid">
       <div class="phone-col"><div class="phone"><div class="phone__screen">
-        <div class="p-top"><div class="b"><span class="x">💊</span>Mi Negocio</div><div class="a">🌙 ⚙️</div></div>
+        <div class="p-top"><div class="b"><span class="x">💊</span>Mi Negocio</div><div class="a">🌙 ☁️ ⚙️</div></div>
         <div class="p-view">
           <div class="scr__h"><div><h4>Nueva compra</h4></div></div>
           <div class="fld"><span class="fl">Proveedor<span class="chipnum">1</span></span><div class="finput">Distribuidora Farmacol</div></div>
+          <div style="display:flex;gap:5px">
+            <div class="fld" style="flex:1.4"><span class="fl">N° de factura / recibo <span class="req">*</span><span class="chipnum">4</span></span><div class="finput">FE-0912</div></div>
+            <div class="fld" style="flex:1"><span class="fl">Medio de pago<span class="chipnum">5</span></span><div class="finput">Transferencia</div></div>
+          </div>
+          <div class="attach" style="margin-bottom:7px">📎 factura-FE-0912.pdf · adjunta <span class="req">*</span></div>
           <div class="fld"><span class="fl">Medicamento — catálogo completo<span class="chipnum">2</span></span><div class="finput">EUTIROX 100 MG <span style="color:#0d9488;font-weight:800">· nuevo</span></div></div>
           <div style="display:flex;gap:5px">
-            <div class="fld" style="flex:1"><span class="fl">Cant./costo</span><div class="finput">20 · $15.000</div></div>
-            <div class="fld" style="flex:1"><span class="fl">Lote<span class="chipnum">3</span></span><div class="finput">L2026A</div></div>
-            <div class="fld" style="flex:1"><span class="fl">Vence</span><div class="finput">📅 17/07/27</div></div>
+            <div class="fld" style="flex:1"><span class="fl">Cant./costo <span class="req">*</span></span><div class="finput">20 · $15.000</div></div>
+            <div class="fld" style="flex:1"><span class="fl">Lote <span class="req">*</span><span class="chipnum">3</span></span><div class="finput">L2026A</div></div>
+            <div class="fld" style="flex:1"><span class="fl">Vence <span class="req">*</span></span><div class="finput">📅 17/07/27</div></div>
           </div>
           <div class="lrow" style="margin:6px 0"><div><div class="t1">EUTIROX 100 MG <span style="color:#0d9488;font-weight:800">· nuevo</span></div><div class="t2">20 × $15.000 · lote L2026A · vence 17/07/2027</div></div><div class="amt">$300.000</div></div>
           <div class="sbtn pri" style="width:100%;justify-content:center;padding:8px">Registrar compra · $300.000</div>
         </div>
-        <div class="p-tabs"><div class="t"><span class="i">🏠</span>Inicio</div><div class="t"><span class="i">💵</span>Ventas</div><div class="t on"><span class="i">🛒</span>Compras</div><div class="t"><span class="i">📦</span>Invent.</div><div class="t"><span class="i">👥</span>Client.</div><div class="t"><span class="i">⏰</span>Vence</div><div class="t"><span class="i">📊</span>Report.</div></div>
+        <div class="p-tabs"><div class="t"><span class="i">🏠</span>Inicio</div><div class="t"><span class="i">💵</span>Ventas</div><div class="t"><span class="i">📦</span>Invent.</div><div class="t"><span class="i">👥</span>Client.</div><div class="t on"><span class="i">⋯</span>Más</div></div>
         <div class="p-home"><span></span></div>
       </div></div></div>
       <div class="steps-col"><ol class="steps" style="list-style:none;margin:0;padding:0">
-        <li class="step"><div class="num">1</div><div><h4>Proveedor</h4><p>Escribe de quién compras — queda guardado en el historial de esa compra.</p></div></li>
+        <li class="step"><div class="num">1</div><div><h4>Proveedor</h4><p>Elígelo de la lista (se crean en el módulo <b>🚚 Proveedores</b>). Si la compra es a crédito, la deuda queda registrada en su cuenta.</p></div></li>
         <li class="step"><div class="num">2</div><div><h4>Medicamento</h4><p>Busca en <b>todo</b> el catálogo, no solo en lo que ya tienes en inventario. Si eliges uno que aún no existe, la app lo crea automáticamente (se marca “nuevo”).</p></div></li>
-        <li class="step"><div class="num">3</div><div><h4>Lote y vencimiento</h4><p>El número de lote y la fecha de caducidad quedan guardados con ese ingreso — así la app sabe qué lote vender primero (FIFO) y lo muestra en Inventario y Vencimientos.</p></div></li>
+        <li class="step"><div class="num">3</div><div><h4>Lote y vencimiento <span class="req">obligatorios</span></h4><p>Cantidad, costo, número de lote y fecha de caducidad son <b>obligatorios</b> para agregar el producto. Así la app sabe qué lote vender primero (FIFO) y te avisa antes de que se venza.</p></div></li>
+        <li class="step"><div class="num">4</div><div><h4>Factura y su foto <span class="req">obligatorias</span></h4><p>No se registra la compra sin el <b>número de factura</b> y sin <b>adjuntar la factura</b> (foto o PDF, hasta 6 MB). Queda guardada y la puedes ver o descargar después desde el detalle de la compra.</p></div></li>
+        <li class="step"><div class="num">5</div><div><h4>¿De contado o a crédito?</h4><p>De contado eliges el medio de pago (Efectivo, Transferencia, Tarjeta, Cheque u Otro) y <b>sale de la caja del día</b>. Si marcas <b>“Compra a crédito”</b>, pides el plazo en meses y no toca la caja hoy: queda como factura por pagar en el proveedor.</p></div></li>
       </ol></div>
     </div>
     <div class="tipcard"><span class="bulb">💡</span><div><b>Cada compra suma stock</b> — no necesitas ajustar el inventario aparte. Y si necesitas cargar muchos productos de una vez (tu inventario inicial), en ⚙️ Ajustes hay una plantilla de Excel descargable y un botón de “Cargue masivo”.</div></div>
@@ -326,38 +365,38 @@ footer b{ color:var(--ink) }
     <div class="chapter__head">
       <div class="chapter__idx">04</div>
       <div class="chapter__ic">📦</div>
-      <div class="chapter__ttl"><h2>Inventario</h2><p>Tus productos, con stock y vencimiento — y un catálogo de medicamentos para cargarlos en segundos.</p></div>
+      <div class="chapter__ttl"><h2>Inventario</h2><p>Tus productos con stock y vencimiento, lote por lote — y la posibilidad de corregir cantidades cuando algo no cuadra.</p></div>
     </div>
     <div class="grid">
       <div class="phone-col"><div class="phone"><div class="phone__screen">
-        <div class="p-top"><div class="b"><span class="x">💊</span>Mi Negocio</div><div class="a">🌙 ⚙️</div></div>
+        <div class="p-top"><div class="b"><span class="x">💊</span>Mi Negocio</div><div class="a">🌙 ☁️ ⚙️</div></div>
         <div class="p-view">
           <div class="scr__h"><div><h4>Inventario</h4><div class="sub">5 productos</div></div>
-            <div style="display:flex;gap:4px"><span class="sbtn gho">📊<span class="chipnum">4</span></span><span class="sbtn pri">+ Prod<span class="chipnum">1</span></span></div></div>
+            <div style="display:flex;gap:4px"><span class="sbtn gho">📊<span class="chipnum">5</span></span><span class="sbtn pri">+ Prod<span class="chipnum">1</span></span></div></div>
           <div style="display:flex;gap:5px;margin-bottom:6px">
-            <div class="fld" style="flex:1;margin:0"><span class="fl">Vence desde<span class="chipnum">3</span></span><div class="finput">dd/mm/aaaa</div></div>
+            <div class="fld" style="flex:1;margin:0"><span class="fl">Vence desde<span class="chipnum">4</span></span><div class="finput">dd/mm/aaaa</div></div>
             <div class="fld" style="flex:1;margin:0"><span class="fl">Vence hasta</span><div class="finput">dd/mm/aaaa</div></div>
           </div>
-          <div class="thead"><span>Producto</span><span>Stock</span></div>
           <div class="list">
-            <div class="lrow"><div><div class="t1">DOLIREN CJ X 100</div><div class="t2">Medicamento</div></div><div class="amt">$12.500<br>24 u</div></div>
-            <div class="lrow" style="background:#f8fafc"><div><div class="t1">EUTIROX 100 MG<span class="chipnum">2</span></div><div class="t2">Medicamento · 2 lotes</div></div><div class="amt">$22.000<br><span style="color:#b45309">15 u tot.</span></div></div>
-            <div class="lrow" style="margin-left:14px;padding:4px 9px"><div><div class="t2">↳ lote</div></div><div class="amt" style="font-size:.56rem">10 u · 25/07/26</div></div>
-            <div class="lrow" style="margin-left:14px;padding:4px 9px"><div><div class="t2">↳ lote</div></div><div class="amt" style="font-size:.56rem">5 u · 30/09/26</div></div>
-            <div class="lrow"><div><div class="t1">JARDIANCE 10 MG</div><div class="t2">Medicamento · foto</div></div><div class="amt">$68.000<br><span style="color:#b45309">2 u</span></div></div>
+            <div class="lrow"><div><div class="t1">DOLIREN CJ X 100</div><div class="t2">Medicamento · 24 u · $12.500</div></div><div style="display:flex;gap:3px"><span class="sbtn gho" style="font-size:.5rem">✏️</span><span class="sbtn gho" style="font-size:.5rem;color:#0d9488">📦</span></div></div>
+            <div class="lrow" style="background:#f8fafc"><div><div class="t1">EUTIROX 100 MG<span class="chipnum">2</span></div><div class="t2">Medicamento · 2 lotes · <span style="color:#b45309">15 u tot.</span></div></div><span class="sbtn gho" style="font-size:.5rem">✏️ Editar<span class="chipnum">3</span></span></div>
+            <div class="lrow" style="margin-left:12px;padding:5px 9px"><div><div class="t2">↳ lote L2026A · 10 u · 25/07/26</div></div><span class="sbtn gho" style="font-size:.5rem;color:#0d9488">📦 Ajustar</span></div>
+            <div class="lrow" style="margin-left:12px;padding:5px 9px"><div><div class="t2">↳ lote L2026B · 5 u · 30/09/26</div></div><span class="sbtn gho" style="font-size:.5rem;color:#0d9488">📦 Ajustar</span></div>
+            <div class="lrow"><div><div class="t1">JARDIANCE 10 MG</div><div class="t2">Medicamento · foto · <span style="color:#b45309">2 u</span></div></div><div class="amt">$68.000</div></div>
           </div>
         </div>
-        <div class="p-tabs"><div class="t"><span class="i">🏠</span>Inicio</div><div class="t"><span class="i">💵</span>Ventas</div><div class="t"><span class="i">🛒</span>Compras</div><div class="t on"><span class="i">📦</span>Invent.</div><div class="t"><span class="i">👥</span>Client.</div><div class="t"><span class="i">⏰</span>Vence</div><div class="t"><span class="i">📊</span>Report.</div></div>
+        <div class="p-tabs"><div class="t"><span class="i">🏠</span>Inicio</div><div class="t"><span class="i">💵</span>Ventas</div><div class="t on"><span class="i">📦</span>Invent.</div><div class="t"><span class="i">👥</span>Client.</div><div class="t"><span class="i">⋯</span>Más</div></div>
         <div class="p-home"><span></span></div>
       </div></div></div>
       <div class="steps-col"><ol class="steps" style="list-style:none;margin:0;padding:0">
         <li class="step"><div class="num">1</div><div><h4>+ Producto</h4><p>Escribe el nombre y aparece tu catálogo de medicamentos para elegirlo con un clic — o escribe uno nuevo si no está.</p></div></li>
-        <li class="step"><div class="num">2</div><div><h4>Lotes por vencimiento</h4><p>Si un producto tiene varios lotes, se listan por separado ordenados del que vence más pronto al que vence más lejos.</p></div></li>
-        <li class="step"><div class="num">3</div><div><h4>Filtro por fecha</h4><p>Muestra solo los lotes que vencen en el rango que elijas — útil para revisar qué se vence este mes, por ejemplo.</p></div></li>
-        <li class="step"><div class="num">4</div><div><h4>📊 Excel</h4><p>Descarga un reporte con los indicadores principales (KPI) y el detalle completo de tu inventario, listo para revisar o compartir.</p></div></li>
+        <li class="step"><div class="num">2</div><div><h4>Lotes por vencimiento</h4><p>Si un producto tiene varios lotes, se listan por separado ordenados del que vence más pronto al que vence más lejos. El stock que ves arriba es la suma de todos.</p></div></li>
+        <li class="step"><div class="num">3</div><div><h4>✏️ Editar vs 📦 Ajustar</h4><p>Son dos cosas distintas: <b>✏️ Editar</b> cambia los datos del producto (nombre, precio, categoría, foto). <b>📦 Ajustar</b> corrige un <b>lote</b> concreto: su cantidad, su código, su vencimiento y su costo — para cuando haces conteo físico y algo no cuadra. Si dejas la cantidad en <b>0</b>, el lote desaparece.</p></div></li>
+        <li class="step"><div class="num">4</div><div><h4>Filtro por fecha</h4><p>Muestra solo los lotes que vencen en el rango que elijas — útil para revisar qué se vence este mes, por ejemplo.</p></div></li>
+        <li class="step"><div class="num">5</div><div><h4>📊 Excel</h4><p>Descarga un reporte con los indicadores principales (KPI) y el detalle completo de tu inventario, listo para revisar o compartir.</p></div></li>
       </ol></div>
     </div>
-    <div class="tipcard"><span class="bulb">💡</span><div><b>Los números en naranja</b> son productos con poco stock (según la alerta que configures en Ajustes).</div></div>
+    <div class="tipcard"><span class="bulb">💡</span><div><b>En el celular verás tarjetas</b> en vez de tabla (para que quepa todo en la pantalla) y en el computador una tabla completa. El buscador de arriba filtra las dos por igual, y <b>los números en naranja</b> son productos con poco stock, según la alerta que configures en Ajustes.</div></div>
   </section>
 
   <!-- 05 CLIENTES -->
@@ -365,82 +404,128 @@ footer b{ color:var(--ink) }
     <div class="chapter__head">
       <div class="chapter__idx">05</div>
       <div class="chapter__ic">👥</div>
-      <div class="chapter__ttl"><h2>Clientes</h2><p>Guarda a tus clientes y el fiado que te deben, con estado de cuenta detallado y recordatorio por WhatsApp.</p></div>
+      <div class="chapter__ttl"><h2>Clientes</h2><p>Tus clientes y lo que te deben — <b>factura por factura</b>, con estado de cuenta y recordatorio por WhatsApp.</p></div>
     </div>
     <div class="grid">
       <div class="phone-col"><div class="phone"><div class="phone__screen">
-        <div class="p-top"><div class="b"><span class="x">💊</span>Mi Negocio</div><div class="a">🌙 ⚙️</div></div>
+        <div class="p-top"><div class="b"><span class="x">💊</span>Mi Negocio</div><div class="a">🌙 ☁️ ⚙️</div></div>
         <div class="p-view">
-          <div class="scr__h"><div><h4>María Fernanda Gómez</h4><div class="sub">3001234567</div></div></div>
-          <div class="panel" style="margin-bottom:8px">
-            <div class="ph"><span>Historial de deuda<span class="chipnum">1</span></span><span style="color:#b45309">debe $45.000</span></div>
-            <div class="row"><span>14/07 · Fiado: DOLIREN x2</span><b style="color:#b45309">+$45.000</b></div></div>
-          <div style="display:flex;gap:5px;margin-bottom:5px">
-            <span class="sbtn gho" style="flex:1;justify-content:center">Abono</span>
-            <span class="sbtn teal" style="flex:1;justify-content:center">Cobrar 📲</span></div>
-          <div class="finput" style="text-align:center;color:#2563eb;font-weight:800">📄 Ver estado de cuenta<span class="chipnum">2</span></div>
-          <div class="panel" style="margin-top:8px">
-            <div class="ph"><span>📄 Estado de cuenta<span class="chipnum">3</span></span></div>
-            <div class="row"><span>14/07 · DOLIREN x2, EUTIROX x1</span><b style="color:#b45309">+$45.000</b></div>
-            <div class="row" style="border-top:1px dashed #dde4f0;margin-top:3px;padding-top:5px"><span>Saldo actual</span><b style="color:#b45309">$45.000</b></div>
-            <div class="sbtn teal" style="width:100%;justify-content:center;margin-top:5px">📲 Enviar por WhatsApp<span class="chipnum">4</span></div></div>
+          <div class="scr__h"><div><h4>María Fernanda Gómez</h4><div class="sub">Tienda La Esquina · 3001234567</div></div></div>
+          <div class="panel" style="margin-bottom:7px">
+            <div class="ph"><span>📄 Estado de cuenta<span class="chipnum">1</span></span><span style="color:#b45309">debe $45.000</span></div>
+            <div class="row"><span>Venta #012 · 14/08 · DOLIREN x2</span><b style="color:#b45309">+$30.000</b></div>
+            <div class="row" style="color:#be123c;font-size:.54rem;padding-top:0"><span>Pendiente: $15.000 · abonado $15.000</span></div>
+            <div class="row"><span>Venta #013 · 20/08 · EUTIROX x1</span><b style="color:#b45309">+$30.000</b></div>
+            <div class="row" style="color:#be123c;font-size:.54rem;padding-top:0"><span>Pendiente: $30.000 · pagar antes del 20/09</span></div>
+            <div class="row"><span>21/08 · Abono recibido</span><b style="color:#0d9488">−$15.000</b></div>
+            <div class="row" style="color:#8a93a6;font-size:.54rem;padding-top:0"><span>Aplicado a: Venta #012 ($15.000)</span></div>
+          </div>
+          <div class="fld"><span class="fl">¿A qué factura?<span class="chipnum">2</span></span><div class="finput">Venta #013 — pendiente $30.000</div></div>
+          <div class="fld"><span class="fl">Monto a pagar <span class="req">*</span></span><div class="finput">$30.000</div></div>
+          <div style="display:flex;gap:5px">
+            <span class="sbtn pri" style="flex:1;justify-content:center">Registrar abono</span>
+            <span class="sbtn teal" style="flex:1;justify-content:center">Cobrar 📲<span class="chipnum">4</span></span></div>
         </div>
-        <div class="p-tabs"><div class="t"><span class="i">🏠</span>Inicio</div><div class="t"><span class="i">💵</span>Ventas</div><div class="t"><span class="i">🛒</span>Compras</div><div class="t"><span class="i">📦</span>Invent.</div><div class="t on"><span class="i">👥</span>Client.</div><div class="t"><span class="i">⏰</span>Vence</div><div class="t"><span class="i">📊</span>Report.</div></div>
+        <div class="p-tabs"><div class="t"><span class="i">🏠</span>Inicio</div><div class="t"><span class="i">💵</span>Ventas</div><div class="t"><span class="i">📦</span>Invent.</div><div class="t on"><span class="i">👥</span>Client.</div><div class="t"><span class="i">⋯</span>Más</div></div>
         <div class="p-home"><span></span></div>
       </div></div></div>
       <div class="steps-col"><ol class="steps" style="list-style:none;margin:0;padding:0">
-        <li class="step"><div class="num">1</div><div><h4>Historial de deuda</h4><p>Cada fiado (con los productos que se llevó) y cada abono queda registrado con fecha y monto — nunca pierdes la cuenta.</p></div></li>
-        <li class="step"><div class="num">2</div><div><h4>Estado de cuenta</h4><p>Abre el detalle completo de todo lo que debe el cliente, con productos y fechas de cada fiado.</p></div></li>
-        <li class="step"><div class="num">3</div><div><h4>Detalle con productos</h4><p>Cada línea muestra qué compró fiado el cliente y cuándo, no solo el monto — así ambos recuerdan de qué se trata la deuda.</p></div></li>
-        <li class="step"><div class="num">4</div><div><h4>Enviar por WhatsApp</h4><p>Manda el estado de cuenta completo directo al celular del cliente, con productos y fechas incluidos.</p></div></li>
+        <li class="step"><div class="num">1</div><div><h4>Cada venta a crédito es una factura</h4><p>El estado de cuenta ya no es un solo montón: cada venta a crédito aparece por separado con lo que <b>falta por pagar</b> (“Pendiente: $15.000 · abonado $15.000”) o marcada <b>“✓ Pagada”</b>, y con su fecha límite.</p></div></li>
+        <li class="step"><div class="num">2</div><div><h4>Abonar a una factura específica</h4><p>Al registrar un abono eliges <b>a qué factura</b> se aplica y el monto se ajusta solo a lo que falta de esa. No te deja cobrar de más.</p></div></li>
+        <li class="step"><div class="num">3</div><div><h4>O “toda la deuda”</h4><p>Si el cliente te da una plata sin decir de qué factura, elige <b>“Toda la deuda (las más antiguas primero)”</b> y la app la reparte sola, empezando por la factura más vieja. En el historial queda escrito <b>“Aplicado a: …”</b>, para que después sepas exactamente a qué se fue cada peso.</p></div></li>
+        <li class="step"><div class="num">4</div><div><h4>Cobrar por WhatsApp</h4><p>Manda el estado de cuenta completo al celular del cliente — con productos, fechas y la fecha límite de pago incluidas.</p></div></li>
       </ol></div>
     </div>
-    <div class="tipcard"><span class="bulb">💡</span><div><b>El buscador de arriba</b> filtra por nombre o teléfono al instante. Y con “📊 Exportar Excel” descargas un reporte con el saldo de cada cliente y los indicadores de tu cartera.</div></div>
+    <div class="tipcard"><span class="bulb">💡</span><div><b>Guarda el nombre del negocio y el plazo</b> de cada cliente: el plazo se propone solo cada vez que le vendes a crédito, y el negocio sale impreso en el recibo y en el estado de cuenta. Con “📊 Exportar Excel” descargas la cartera completa.</div></div>
   </section>
 
-  <!-- 06 VENCIMIENTOS -->
-  <section class="chapter flip reveal" id="vencimientos">
+  <!-- 06 PROVEEDORES -->
+  <section class="chapter flip reveal" id="proveedores">
     <div class="chapter__head">
       <div class="chapter__idx">06</div>
+      <div class="chapter__ic">🚚</div>
+      <div class="chapter__ttl"><h2>Proveedores</h2><p>El otro lado de la cuenta: a quién le debes, por cuál factura y con qué soporte le pagaste. Es un módulo propio, igual que Clientes.</p></div>
+    </div>
+    <div class="grid">
+      <div class="phone-col"><div class="phone"><div class="phone__screen">
+        <div class="p-top"><div class="b"><span class="x">💊</span>Mi Negocio</div><div class="a">🌙 ☁️ ⚙️</div></div>
+        <div class="p-view">
+          <div class="scr__h"><div><h4>Distribuidora Farmacol</h4><div class="sub">Le debes $300.000</div></div></div>
+          <div class="panel" style="margin-bottom:7px">
+            <div class="ph"><span>📄 Estado de cuenta<span class="chipnum">1</span></span></div>
+            <div class="row"><span>Factura FE-0912 · 20/08</span><b style="color:#be123c">+$500.000</b></div>
+            <div class="row" style="color:#be123c;font-size:.54rem;padding-top:0"><span>Pendiente: $300.000 · abonado $200.000</span></div>
+            <div class="row"><span>Factura FE-0870 · 02/08</span><b style="color:#be123c">+$180.000</b></div>
+            <div class="row" style="color:#0d9488;font-size:.54rem;padding-top:0"><span>✓ Pagada</span></div>
+          </div>
+          <div class="fld"><span class="fl">¿A qué factura?<span class="chipnum">2</span></span><div class="finput">Factura FE-0912 — pendiente $300.000</div></div>
+          <div style="display:flex;gap:5px">
+            <div class="fld" style="flex:1"><span class="fl">Monto a pagar <span class="req">*</span></span><div class="finput">$300.000</div></div>
+            <div class="fld" style="flex:1"><span class="fl">Medio de pago</span><div class="finput">Transferencia</div></div>
+          </div>
+          <div class="attach" style="margin-bottom:6px">📎 comprobante-nequi.jpg <span class="req">*</span><span class="chipnum">3</span></div>
+          <div class="sbtn pri" style="width:100%;justify-content:center;padding:8px">Registrar pago</div>
+        </div>
+        <div class="p-tabs"><div class="t"><span class="i">🏠</span>Inicio</div><div class="t"><span class="i">💵</span>Ventas</div><div class="t"><span class="i">📦</span>Invent.</div><div class="t"><span class="i">👥</span>Client.</div><div class="t on"><span class="i">⋯</span>Más</div></div>
+        <div class="p-home"><span></span></div>
+      </div></div></div>
+      <div class="steps-col"><ol class="steps" style="list-style:none;margin:0;padding:0">
+        <li class="step"><div class="num">1</div><div><h4>Una línea por factura</h4><p>Cada compra a crédito entra como una factura con su número, su fecha límite y lo que falta por pagarle. Ves de un vistazo cuáles están <b>pendientes</b> y cuáles <b>✓ Pagadas</b>.</p></div></li>
+        <li class="step"><div class="num">2</div><div><h4>Paga la factura que quieras</h4><p>Elige la factura concreta que estás pagando y el monto se ajusta a su saldo. También puedes elegir <b>“Toda la deuda (las más antiguas primero)”</b> y la app reparte el pago sola.</p></div></li>
+        <li class="step"><div class="num">3</div><div><h4>Soporte de pago <span class="req">obligatorio</span></h4><p>No se registra el pago sin adjuntar el <b>comprobante</b> (captura de la transferencia, recibo, PDF). Queda guardado en el estado de cuenta con un enlace para verlo o descargarlo cuando lo necesites.</p></div></li>
+        <li class="step"><div class="num">4</div><div><h4>Sale de la caja del día</h4><p>Todo pago a proveedor se descuenta del cierre de caja de ese día, igual que un gasto — así el efectivo que reporta la app es el que de verdad tienes.</p></div></li>
+      </ol></div>
+    </div>
+    <div class="tipcard"><span class="bulb">💡</span><div><b>Dónde está:</b> en el computador, en la barra lateral (🚚 Proveedores). En el celular, toca <b>“⋯ Más”</b> en la barra de abajo. Los proveedores se crean aquí y después aparecen en la lista del formulario de compra.</div></div>
+  </section>
+
+  <!-- 07 VENCIMIENTOS -->
+  <section class="chapter reveal" id="vencimientos">
+    <div class="chapter__head">
+      <div class="chapter__idx">07</div>
       <div class="chapter__ic">⏰</div>
       <div class="chapter__ttl"><h2>Vencimientos</h2><p>Todos tus lotes agrupados según qué tan cerca está su fecha de caducidad.</p></div>
     </div>
     <div class="grid">
       <div class="phone-col"><div class="phone"><div class="phone__screen">
-        <div class="p-top"><div class="b"><span class="x">💊</span>Mi Negocio</div><div class="a">🌙 ⚙️</div></div>
+        <div class="p-top"><div class="b"><span class="x">💊</span>Mi Negocio</div><div class="a">🌙 ☁️ ⚙️</div></div>
         <div class="p-view">
           <div class="scr__h"><div><h4>Vencimientos</h4><div class="sub">alertas a 30 días</div></div></div>
           <div style="font-size:.62rem;font-weight:800;color:#be123c;margin:6px 0 3px">🔴 Vencidos (1)<span class="chipnum">1</span></div>
-          <div class="lrow"><div><div class="t1">DOLIREN CJ X 100</div><div class="t2">5 u · lote 13/07/2026</div></div><div class="amt bad">Vencido hace 4d</div></div>
+          <div class="lrow"><div><div class="t1">DOLIREN CJ X 100</div><div class="t2">5 u · lote L2025C · 13/08/2026</div></div><div class="amt bad">Vencido hace 4d</div></div>
           <div style="font-size:.62rem;font-weight:800;color:#b45309;margin:8px 0 3px">🟠 Críticos ≤7 días (1)<span class="chipnum">2</span></div>
-          <div class="lrow"><div><div class="t1">ESOMEPRAZOL 20 MG</div><div class="t2">8 u · lote 20/07/2026</div></div><div class="amt warn">En 3 días</div></div>
+          <div class="lrow"><div><div class="t1">ESOMEPRAZOL 20 MG</div><div class="t2">8 u · lote E-441 · 31/08/2026</div></div><div class="amt warn">En 3 días</div></div>
           <div style="font-size:.62rem;font-weight:800;color:#a16207;margin:8px 0 3px">🟡 Próximos (1)</div>
-          <div class="lrow"><div><div class="t1">EUTIROX 100 MG</div><div class="t2">3 u · lote 29/07/2026</div></div><div class="amt">En 12 días</div></div>
+          <div class="lrow"><div><div class="t1">EUTIROX 100 MG</div><div class="t2">3 u · lote L2026A · 09/09/2026</div></div><div class="amt">En 12 días</div></div>
         </div>
-        <div class="p-tabs"><div class="t"><span class="i">🏠</span>Inicio</div><div class="t"><span class="i">💵</span>Ventas</div><div class="t"><span class="i">🛒</span>Compras</div><div class="t"><span class="i">📦</span>Invent.</div><div class="t"><span class="i">👥</span>Client.</div><div class="t on"><span class="i">⏰</span>Vence</div><div class="t"><span class="i">📊</span>Report.</div></div>
+        <div class="p-tabs"><div class="t"><span class="i">🏠</span>Inicio</div><div class="t"><span class="i">💵</span>Ventas</div><div class="t"><span class="i">📦</span>Invent.</div><div class="t"><span class="i">👥</span>Client.</div><div class="t on"><span class="i">⋯</span>Más</div></div>
         <div class="p-home"><span></span></div>
       </div></div></div>
       <div class="steps-col"><ol class="steps" style="list-style:none;margin:0;padding:0">
-        <li class="step"><div class="num">1</div><div><h4>🔴 Vencidos</h4><p>Ya pasaron su fecha — retíralos de la venta cuanto antes.</p></div></li>
-        <li class="step"><div class="num">2</div><div><h4>🟠 Críticos y 🟡 próximos</h4><p>Vencen en 7 días o menos (crítico) o dentro del rango de alerta (próximo) — véndelos primero.</p></div></li>
+        <li class="step"><div class="num">1</div><div><h4>🔴 Vencidos</h4><p>Ya pasaron su fecha — retíralos de la venta cuanto antes. Puedes dejar el lote en 0 desde Inventario con <b>“📦 Ajustar”</b> para sacarlo de tu stock.</p></div></li>
+        <li class="step"><div class="num">2</div><div><h4>🟠 Críticos y 🟡 próximos</h4><p>Vencen en 7 días o menos (crítico) o dentro del rango de alerta (próximo) — véndelos primero. La app siempre despacha el lote que vence antes.</p></div></li>
       </ol></div>
     </div>
-    <div class="tipcard"><span class="bulb">💡</span><div><b>El número de días de alerta</b> se ajusta en ⚙️ Ajustes (“Alerta vencimiento”).</div></div>
+    <div class="tipcard"><span class="bulb">💡</span><div><b>El número de días de alerta</b> se ajusta en ⚙️ Ajustes (“Alerta vencimiento”). El globito rojo del menú cuenta solo lotes con existencias — los que están en 0 no molestan.</div></div>
   </section>
 
-  <!-- 07 REPORTES -->
-  <section class="chapter reveal" id="reportes">
+  <!-- 08 REPORTES -->
+  <section class="chapter flip reveal" id="reportes">
     <div class="chapter__head">
-      <div class="chapter__idx">07</div>
+      <div class="chapter__idx">08</div>
       <div class="chapter__ic">📊</div>
-      <div class="chapter__ttl"><h2>Reportes</h2><p>El desempeño del mes de un vistazo: ventas, ganancia, gastos y lo que más se vende.</p></div>
+      <div class="chapter__ttl"><h2>Reportes</h2><p>El desempeño del periodo de un vistazo: ventas, ganancia, compras, gastos y lo que más se vende.</p></div>
     </div>
     <div class="grid">
       <div class="phone-col"><div class="phone"><div class="phone__screen">
-        <div class="p-top"><div class="b"><span class="x">💊</span>Mi Negocio</div><div class="a">🌙 ⚙️</div></div>
+        <div class="p-top"><div class="b"><span class="x">💊</span>Mi Negocio</div><div class="a">🌙 ☁️ ⚙️</div></div>
         <div class="p-view">
-          <div class="scr__h"><div><h4>Reportes</h4><div class="sub">julio 2026 · 3 ventas</div></div>
-            <div style="display:flex;gap:4px"><span class="sbtn gho">💸 Gastos</span><span class="sbtn gho">🧾<span class="chipnum">3</span></span></div></div>
+          <div class="scr__h"><div><h4>Reportes</h4><div class="sub">agosto 2026 · 3 ventas</div></div>
+            <div style="display:flex;gap:4px"><span class="sbtn gho">💸 Gastos</span><span class="sbtn gho">🧾<span class="chipnum">4</span></span></div></div>
+          <div style="display:flex;gap:5px;margin-bottom:6px">
+            <div class="fld" style="flex:1;margin:0"><span class="fl">Desde<span class="chipnum">3</span></span><div class="finput">01/08/2026</div></div>
+            <div class="fld" style="flex:1;margin:0"><span class="fl">Hasta</span><div class="finput">28/08/2026</div></div>
+          </div>
           <div class="kpis">
             <div class="kpi"><div class="l">Ventas</div><div class="v good">$164.000</div></div>
             <div class="kpi"><div class="l">Ganancia</div><div class="v" style="color:#2563eb">$54.000</div></div>
@@ -453,36 +538,37 @@ footer b{ color:var(--ink) }
             <div class="swatch-row" style="align-items:flex-end;height:26px">
               <div class="swatch" style="background:#dbeafe;height:40%"></div><div class="swatch" style="background:#93c5fd;height:60%"></div><div class="swatch" style="background:#2563eb;height:100%"></div><div class="swatch" style="background:#dbeafe;height:30%"></div><div class="swatch" style="background:#60a5fa;height:70%"></div></div></div>
         </div>
-        <div class="p-tabs"><div class="t"><span class="i">🏠</span>Inicio</div><div class="t"><span class="i">💵</span>Ventas</div><div class="t"><span class="i">🛒</span>Compras</div><div class="t"><span class="i">📦</span>Invent.</div><div class="t"><span class="i">👥</span>Client.</div><div class="t"><span class="i">⏰</span>Vence</div><div class="t on"><span class="i">📊</span>Report.</div></div>
+        <div class="p-tabs"><div class="t"><span class="i">🏠</span>Inicio</div><div class="t"><span class="i">💵</span>Ventas</div><div class="t"><span class="i">📦</span>Invent.</div><div class="t"><span class="i">👥</span>Client.</div><div class="t on"><span class="i">⋯</span>Más</div></div>
         <div class="p-home"><span></span></div>
       </div></div></div>
       <div class="steps-col"><ol class="steps" style="list-style:none;margin:0;padding:0">
-        <li class="step"><div class="num">1</div><div><h4>Más vendidos</h4><p>Qué productos se están moviendo más este mes — para no quedarte sin ellos.</p></div></li>
+        <li class="step"><div class="num">1</div><div><h4>Más vendidos</h4><p>Qué productos se están moviendo más — para no quedarte sin ellos.</p></div></li>
         <li class="step"><div class="num">2</div><div><h4>Ventas últimos 7 días</h4><p>Compara tus ventas día por día en la última semana, de un vistazo.</p></div></li>
-        <li class="step"><div class="num">3</div><div><h4>🧾 Cierre</h4><p>Abre el resumen de caja del día — ver la sección de Cierre más abajo.</p></div></li>
+        <li class="step"><div class="num">3</div><div><h4>Filtro de fechas</h4><p>Elige el periodo que quieras (una semana, un trimestre, el año) y todos los indicadores y el top de vendidos se recalculan para ese rango.</p></div></li>
+        <li class="step"><div class="num">4</div><div><h4>🧾 Cierre</h4><p>Abre el resumen de caja. Si tienes un filtro de fechas activo, el cierre sale <b>por ese mismo periodo</b> — no solo del día de hoy.</p></div></li>
       </ol></div>
     </div>
   </section>
 
-  <!-- 08 GASTOS -->
-  <section class="chapter flip reveal" id="gastos">
+  <!-- 09 GASTOS -->
+  <section class="chapter reveal" id="gastos">
     <div class="chapter__head">
-      <div class="chapter__idx">08</div>
+      <div class="chapter__idx">09</div>
       <div class="chapter__ic">💸</div>
       <div class="chapter__ttl"><h2>Gastos e ingresos</h2><p>Arriendo, servicios, nómina — todo lo que sale del negocio, para saber cuánto te queda de verdad. <b>No está en el menú:</b> se abre desde 📊 Reportes con el botón “💸 Gastos”.</p></div>
     </div>
     <div class="grid">
       <div class="phone-col"><div class="phone"><div class="phone__screen">
-        <div class="p-top"><div class="b"><span class="x">💊</span>Mi Negocio</div><div class="a">🌙 ⚙️</div></div>
+        <div class="p-top"><div class="b"><span class="x">💊</span>Mi Negocio</div><div class="a">🌙 ☁️ ⚙️</div></div>
         <div class="p-view">
           <div class="scr__h"><div><h4>Gastos e ingresos</h4><div class="sub">este mes: $920.000</div></div><span class="sbtn pri">+ Mov<span class="chipnum">1</span></span></div>
           <div class="list">
-            <div class="lrow"><div><div class="t1">Arriendo</div><div class="t2">17/07 · Arriendo del local</div></div><div class="amt bad">−$800.000</div></div>
-            <div class="lrow"><div><div class="t1">Servicios públicos</div><div class="t2">17/07 · Recibo de energía</div></div><div class="amt bad">−$120.000</div></div>
+            <div class="lrow"><div><div class="t1">Arriendo</div><div class="t2">28/08 · Arriendo del local</div></div><div class="amt bad">−$800.000</div></div>
+            <div class="lrow"><div><div class="t1">Servicios públicos</div><div class="t2">28/08 · Recibo de energía</div></div><div class="amt bad">−$120.000</div></div>
           </div>
           <div class="fld" style="margin-top:8px"><span class="fl">Tipo<span class="chipnum">2</span></span><div class="finput">💸 Gasto · Categoría: Arriendo</div></div>
         </div>
-        <div class="p-tabs"><div class="t"><span class="i">🏠</span>Inicio</div><div class="t"><span class="i">💵</span>Ventas</div><div class="t"><span class="i">🛒</span>Compras</div><div class="t"><span class="i">📦</span>Invent.</div><div class="t"><span class="i">👥</span>Client.</div><div class="t"><span class="i">⏰</span>Vence</div><div class="t on"><span class="i">📊</span>Report.</div></div>
+        <div class="p-tabs"><div class="t"><span class="i">🏠</span>Inicio</div><div class="t"><span class="i">💵</span>Ventas</div><div class="t"><span class="i">📦</span>Invent.</div><div class="t"><span class="i">👥</span>Client.</div><div class="t on"><span class="i">⋯</span>Más</div></div>
         <div class="p-home"><span></span></div>
       </div></div></div>
       <div class="steps-col"><ol class="steps" style="list-style:none;margin:0;padding:0">
@@ -490,55 +576,117 @@ footer b{ color:var(--ink) }
         <li class="step"><div class="num">2</div><div><h4>Categoría</h4><p>Elige entre Arriendo, Servicios, Nómina, Transporte, Impuestos u Otro — para tus reportes.</p></div></li>
       </ol></div>
     </div>
-    <div class="tipcard"><span class="bulb">💡</span><div><b>Cómo llegar:</b> entra a 📊 Reportes y toca el botón “💸 Gastos” (también puedes registrar un gasto desde el Cierre de caja). Estos montos se restan automáticamente en el cierre del día.</div></div>
+    <div class="tipcard"><span class="bulb">💡</span><div><b>Cómo llegar:</b> entra a 📊 Reportes y toca el botón “💸 Gastos” (también puedes registrar un gasto desde el Cierre de caja). Estos montos se restan automáticamente en el cierre del día. <b>Ojo:</b> las compras y los pagos a proveedores <b>no</b> van aquí — la app ya los descuenta sola.</div></div>
   </section>
 
-  <!-- 09 CIERRE -->
-  <section class="chapter reveal" id="cierre">
+  <!-- 10 CIERRE -->
+  <section class="chapter flip reveal" id="cierre">
     <div class="chapter__head">
-      <div class="chapter__idx">09</div>
+      <div class="chapter__idx">10</div>
       <div class="chapter__ic">🧾</div>
-      <div class="chapter__ttl"><h2>Cierre de caja</h2><p>El resumen del día listo para enviar por WhatsApp o imprimir, sin sacar la calculadora. <b>No está en el menú:</b> es un botón “🧾 Cierre” en Inicio y Reportes.</p></div>
+      <div class="chapter__ttl"><h2>Cierre de caja</h2><p>Todo lo que entró y todo lo que salió, listo para enviar por WhatsApp o imprimir. <b>No está en el menú:</b> es el botón “🧾 Cierre” en Inicio y en Reportes.</p></div>
     </div>
     <div class="grid">
       <div class="phone-col"><div class="phone"><div class="phone__screen">
-        <div class="p-top"><div class="b"><span class="x">💊</span>Mi Negocio</div><div class="a">🌙 ⚙️</div></div>
+        <div class="p-top"><div class="b"><span class="x">💊</span>Mi Negocio</div><div class="a">🌙 ☁️ ⚙️</div></div>
         <div class="p-view">
           <div class="scr__h"><div><h4>Cierre de caja — hoy</h4></div></div>
           <div class="panel">
-            <div class="row"><span>Ventas del día</span><b>2 · $52.000</b></div>
-            <div class="row"><span>De contado</span><b>$52.000</b></div>
+            <div class="row"><span>Ventas del periodo</span><b>2 · $52.000</b></div>
+            <div class="row"><span>De contado<span class="chipnum">1</span></span><b>$52.000</b></div>
             <div class="row" style="padding-left:8px"><span>Efectivo</span><b>$25.000</b></div>
             <div class="row" style="padding-left:8px"><span>Nequi</span><b>$27.000</b></div>
-            <div class="row"><span>Fiado</span><b style="color:#b45309">$0</b></div>
-            <div class="row"><span>Gastos del día<span class="chipnum">1</span></span><b style="color:#be123c">−$40.000</b></div>
-            <div class="row" style="border-top:1px dashed #dde4f0;margin-top:3px;padding-top:5px"><span>💵 Caja del día<span class="chipnum">2</span></span><b style="color:#0d9488">$12.000</b></div>
+            <div class="row"><span>Crédito</span><b style="color:#b45309">$0</b></div>
+            <div class="row"><span>Abonos recibidos</span><b style="color:#0d9488">$20.000</b></div>
+            <div class="sep" style="border-top:1px dashed #dde4f0;margin:4px 0"></div>
+            <div class="row"><span>Gastos<span class="chipnum">2</span></span><b style="color:#be123c">−$10.000</b></div>
+            <div class="row"><span>Compras de contado</span><b style="color:#be123c">−$30.000</b></div>
+            <div class="row"><span>Pagos a proveedores</span><b style="color:#be123c">−$50.000</b></div>
+            <div class="row" style="border-top:1px dashed #dde4f0;margin-top:3px;padding-top:5px"><span>💵 Caja del periodo<span class="chipnum">3</span></span><b style="color:#0d9488">$10.000</b></div>
+            <div class="row"><span>📈 Ganancia estimada</span><b style="color:#2563eb">$18.000</b></div>
           </div>
-          <div style="display:flex;gap:5px;margin-top:6px">
-            <span class="sbtn teal" style="flex:1;justify-content:center">📲 WhatsApp<span class="chipnum">3</span></span>
-            <span class="sbtn gho" style="flex:1;justify-content:center">🖨️ Imprimir</span></div>
+          <div style="display:flex;gap:4px;margin-top:6px">
+            <span class="sbtn teal" style="flex:1;justify-content:center">📲 WhatsApp</span>
+            <span class="sbtn gho" style="flex:1;justify-content:center">🖨️ Imprimir</span>
+            <span class="sbtn gho" style="flex:1;justify-content:center">🖼️ Imagen<span class="chipnum">5</span></span></div>
         </div>
-        <div class="p-tabs"><div class="t"><span class="i">🏠</span>Inicio</div><div class="t"><span class="i">💵</span>Ventas</div><div class="t"><span class="i">🛒</span>Compras</div><div class="t"><span class="i">📦</span>Invent.</div><div class="t"><span class="i">👥</span>Client.</div><div class="t"><span class="i">⏰</span>Vence</div><div class="t on"><span class="i">📊</span>Report.</div></div>
+        <div class="p-tabs"><div class="t"><span class="i">🏠</span>Inicio</div><div class="t"><span class="i">💵</span>Ventas</div><div class="t"><span class="i">📦</span>Invent.</div><div class="t"><span class="i">👥</span>Client.</div><div class="t on"><span class="i">⋯</span>Más</div></div>
         <div class="p-home"><span></span></div>
       </div></div></div>
       <div class="steps-col"><ol class="steps" style="list-style:none;margin:0;padding:0">
-        <li class="step"><div class="num">1</div><div><h4>Gastos del día</h4><p>Se restan del efectivo que entró — así el cierre refleja lo que de verdad tienes en caja.</p></div></li>
-        <li class="step"><div class="num">2</div><div><h4>Caja del día</h4><p>Contado + abonos recibidos − gastos. El número que cuadras al final del turno.</p></div></li>
-        <li class="step"><div class="num">3</div><div><h4>WhatsApp / Imprimir</h4><p>Comparte el cierre con quien lleve las cuentas del negocio, sin escribir nada a mano.</p></div></li>
+        <li class="step"><div class="num">1</div><div><h4>Lo que entró</h4><p>Las ventas de contado (desglosadas por medio de pago), los abonos que te pagaron tus clientes y los ingresos extra. Las ventas a crédito se muestran aparte porque <b>todavía no son plata en caja</b>.</p></div></li>
+        <li class="step"><div class="num">2</div><div><h4>Lo que salió</h4><p>Gastos del periodo, <b>compras de contado</b> y <b>pagos a proveedores</b>. Las compras a crédito aparecen marcadas como “no sale de caja hoy”: se descuentan el día que las pagues.</p></div></li>
+        <li class="step"><div class="num">3</div><div><h4>Caja del periodo</h4><p>La cuenta completa: <b>contado + abonos + ingresos − gastos − compras de contado − pagos a proveedores</b>. Ese es el número que debe cuadrar con el efectivo del cajón al final del turno.</p></div></li>
+        <li class="step"><div class="num">4</div><div><h4>Por día o por periodo</h4><p>Desde Inicio te da el cierre de hoy. Desde Reportes con un filtro de fechas activo, te lo da de ese rango — útil para cuadrar una semana o un mes completo.</p></div></li>
+        <li class="step"><div class="num">5</div><div><h4>Compartir o imprimir</h4><p>Envíalo por WhatsApp a quien lleve las cuentas, imprímelo o genera la imagen para la mini impresora térmica (ver el capítulo siguiente).</p></div></li>
       </ol></div>
     </div>
+    <div class="tipcard"><span class="bulb">💡</span><div><b>Si un saldo no te cuadra</b> con lo que dice el historial de un cliente o proveedor, ve a ⚙️ Ajustes → <b>“🧮 Revisar y cuadrar saldos”</b>: la app compara y te muestra la diferencia antes de corregirla.</div></div>
   </section>
 
-  <!-- 10 NUBE -->
+  <!-- 11 IMPRESIÓN -->
+  <section class="chapter reveal" id="impresion">
+    <div class="chapter__head">
+      <div class="chapter__idx">11</div>
+      <div class="chapter__ic">🖨️</div>
+      <div class="chapter__ttl"><h2>Recibos e impresión térmica</h2><p>Cómo entregarle el recibo al cliente: por WhatsApp, por impresora normal o por la <b>mini impresora térmica</b> de rollo de 58 mm.</p></div>
+    </div>
+    <div class="grid">
+      <div class="phone-col"><div class="phone"><div class="phone__screen">
+        <div class="p-top"><div class="b"><span class="x">💊</span>Mi Negocio</div><div class="a">🌙 ☁️ ⚙️</div></div>
+        <div class="p-view">
+          <div class="scr__h"><div><h4>Recibo · venta #014</h4></div></div>
+          <div class="ticketpaper">
+            <div class="c">MI NEGOCIO</div>
+            <div class="c">Recibo de venta #014</div>
+            <div class="sep"></div>
+            <div>28/08/2026 03:15 p.m.</div>
+            <div>Cliente: Maria F. Gomez</div>
+            <div class="sep"></div>
+            <div>DOLIREN CJ X 100</div>
+            <div class="lr"><span>1 x 11.500</span><span>11.500</span></div>
+            <div>ACETAMINOFEN 500</div>
+            <div class="lr"><span>2 x 1.200</span><span>2.400</span></div>
+            <div class="sep"></div>
+            <div class="lr"><b>TOTAL</b><b>13.900</b></div>
+            <div>Pago: Nequi</div>
+            <div class="sep"></div>
+            <div class="c">Gracias por su compra</div>
+          </div>
+          <div style="display:flex;gap:4px;margin-top:8px">
+            <span class="sbtn teal" style="flex:1;justify-content:center">📲 WhatsApp<span class="chipnum">1</span></span>
+            <span class="sbtn gho" style="flex:1;justify-content:center">🖨️ Imprimir</span>
+            <span class="sbtn pri" style="flex:1;justify-content:center">🖼️ Imagen<span class="chipnum">3</span></span></div>
+        </div>
+        <div class="p-tabs"><div class="t"><span class="i">🏠</span>Inicio</div><div class="t on"><span class="i">💵</span>Ventas</div><div class="t"><span class="i">📦</span>Invent.</div><div class="t"><span class="i">👥</span>Client.</div><div class="t"><span class="i">⋯</span>Más</div></div>
+        <div class="p-home"><span></span></div>
+      </div></div></div>
+      <div class="steps-col"><ol class="steps" style="list-style:none;margin:0;padding:0">
+        <li class="step"><div class="num">1</div><div><h4>📲 WhatsApp</h4><p>Le llega el recibo como mensaje al celular del cliente. Es lo más rápido y no gasta papel.</p></div></li>
+        <li class="step"><div class="num">2</div><div><h4>🖨️ Imprimir</h4><p>Abre el diálogo de impresión ya configurado al <b>ancho real de tu rollo</b> (58 u 80 mm, con el alto libre porque el papel es continuo). Sirve si tu impresora aparece como impresora del sistema.</p></div></li>
+        <li class="step"><div class="num">3</div><div><h4>🖼️ Imagen — para la mini térmica</h4><p>Genera el recibo como <b>foto</b> del ancho exacto del cabezal (384 puntos en 58 mm). Es lo que funciona con Fun Print y apps parecidas, porque esas apps imprimen <b>imágenes</b>, no páginas web. En el celular abre el menú de compartir; en computador te la deja descargar.</p></div></li>
+        <li class="step"><div class="num">4</div><div><h4>¿Salió muy grande o muy pequeña?</h4><p>En ⚙️ Ajustes cambias la <b>letra del ticket</b>: Grande (24 caracteres por línea), Normal (32) o Pequeña (40). Entre más caracteres por línea, más pequeña la letra y más cabe. La impresión y la imagen usan siempre el mismo tamaño.</p></div></li>
+      </ol></div>
+    </div>
+    <div class="miniflow">
+      <div class="mf"><div class="k">1</div><h5>Genera la imagen</h5><p>En el recibo toca <b>🖼️ Imagen</b> y luego, en el menú de compartir del iPhone, <b>“Guardar imagen”</b> (queda en Fotos).</p></div>
+      <div class="mf"><div class="k">2</div><h5>Abre Fun Print</h5><p>Enciende la impresora y conéctala por Bluetooth desde la app.</p></div>
+      <div class="mf"><div class="k">3</div><h5>Elige Imagen / Álbum</h5><p>En Fun Print entra a la opción de <b>Imagen</b> o <b>Foto</b> y busca el recibo que acabas de guardar.</p></div>
+      <div class="mf"><div class="k">4</div><h5>Imprime</h5><p>Sale al ancho exacto del rollo, sin encogerse ni cortarse.</p></div>
+    </div>
+    <div class="tipcard"><span class="bulb">💡</span><div><b>Fun Print no aparece en el menú de compartir del iPhone</b> — es una limitación de esa app (no registra la extensión de compartir), no de Farmifer. Por eso el camino es: guardar la imagen en <b>Fotos</b> y luego abrirla desde Fun Print. El <b>ancho del rollo</b> (58 u 80 mm) se configura una sola vez en ⚙️ Ajustes.</div></div>
+  </section>
+
+  <!-- 12 NUBE -->
   <section class="chapter flip reveal" id="nube">
     <div class="chapter__head">
-      <div class="chapter__idx">10</div>
+      <div class="chapter__idx">12</div>
       <div class="chapter__ic">☁️</div>
       <div class="chapter__ttl"><h2>Cuenta y sincronización</h2><p>Conecta tu celular y tu computador para que vean siempre los mismos datos.</p></div>
     </div>
     <div class="grid">
       <div class="phone-col"><div class="phone"><div class="phone__screen">
-        <div class="p-top"><div class="b"><span class="x">💊</span>Mi Negocio</div><div class="a">🌙 ⚙️</div></div>
+        <div class="p-top"><div class="b"><span class="x">💊</span>Mi Negocio</div><div class="a">🌙 ☁️ ⚙️</div></div>
         <div class="p-view">
           <div class="scr__h" style="justify-content:center;text-align:center"><div><h4>☁️ Cuenta y sincronización</h4></div></div>
           <p style="font-size:.6rem;color:#64748b;text-align:center;margin:2px 0 8px">Inicia sesión para sincronizar tus datos.</p>
@@ -549,7 +697,7 @@ footer b{ color:var(--ink) }
             <span class="sbtn gho" style="flex:1;justify-content:center">Crear cuenta<span class="chipnum">2</span></span></div>
           <p style="text-align:center;font-size:.58rem;color:#2563eb;margin-top:8px">¿Olvidaste tu contraseña?<span class="chipnum">3</span></p>
         </div>
-        <div class="p-tabs"><div class="t"><span class="i">🏠</span>Inicio</div><div class="t"><span class="i">💵</span>Ventas</div><div class="t"><span class="i">🛒</span>Compras</div><div class="t"><span class="i">📦</span>Invent.</div><div class="t"><span class="i">👥</span>Client.</div><div class="t"><span class="i">⏰</span>Vence</div><div class="t"><span class="i">📊</span>Report.</div></div>
+        <div class="p-tabs"><div class="t"><span class="i">🏠</span>Inicio</div><div class="t"><span class="i">💵</span>Ventas</div><div class="t"><span class="i">📦</span>Invent.</div><div class="t"><span class="i">👥</span>Client.</div><div class="t on"><span class="i">⋯</span>Más</div></div>
         <div class="p-home"><span></span></div>
       </div></div></div>
       <div class="steps-col"><ol class="steps" style="list-style:none;margin:0;padding:0">
@@ -558,43 +706,52 @@ footer b{ color:var(--ink) }
         <li class="step"><div class="num">3</div><div><h4>¿Olvidaste tu contraseña?</h4><p>Te llega un correo para elegir una nueva.</p></div></li>
       </ol></div>
     </div>
-    <div class="tipcard"><span class="bulb">💡</span><div><b>Sin internet no pasa nada:</b> la app sigue funcionando y guarda todo en el dispositivo; apenas vuelva la conexión, sincroniza sola. Esta pantalla se abre desde “☁️ Nube” en la barra lateral.</div></div>
+    <div class="tipcard"><span class="bulb">💡</span><div><b>Sin internet no pasa nada:</b> la app sigue funcionando y guarda todo en el dispositivo; apenas vuelva la conexión, sincroniza sola — no hay que traer ni enviar nada a mano. Esta pantalla se abre desde “☁️ Nube” (barra lateral en computador, botón ☁️ del encabezado o “⋯ Más” en el celular).</div></div>
   </section>
 
-  <!-- 11 AJUSTES -->
+  <!-- 13 AJUSTES -->
   <section class="chapter reveal" id="ajustes">
     <div class="chapter__head">
-      <div class="chapter__idx">11</div>
+      <div class="chapter__idx">13</div>
       <div class="chapter__ic">⚙️</div>
-      <div class="chapter__ttl"><h2>Ajustes</h2><p>El nombre de tu negocio, tus alertas, tu respaldo de datos, el cargue masivo y la ayuda.</p></div>
+      <div class="chapter__ttl"><h2>Ajustes</h2><p>El nombre de tu negocio, las alertas, la impresora, el cuadre de saldos, el cargue masivo y tu respaldo de datos.</p></div>
     </div>
     <div class="grid">
       <div class="phone-col"><div class="phone"><div class="phone__screen">
-        <div class="p-top"><div class="b"><span class="x">💊</span>Mi Negocio</div><div class="a">🌙 ⚙️</div></div>
+        <div class="p-top"><div class="b"><span class="x">💊</span>Mi Negocio</div><div class="a">🌙 ☁️ ⚙️</div></div>
         <div class="p-view">
           <div class="scr__h"><div><h4>Ajustes</h4></div></div>
-          <div class="fld"><span class="fl">Nombre del negocio</span><div class="finput">Mi Negocio</div></div>
+          <div class="fld"><span class="fl">Nombre del negocio</span><div class="finput">Droguería La Esperanza</div></div>
           <div style="display:flex;gap:6px">
             <div class="fld" style="flex:1"><span class="fl">Alerta vencim.<span class="chipnum">1</span></span><div class="finput">30 días</div></div>
             <div class="fld" style="flex:1"><span class="fl">Alerta stock</span><div class="finput">≤ 5</div></div>
           </div>
-          <div style="font-size:.56rem;color:#8a93a6;font-weight:800;margin:8px 0 2px">Cargue masivo (Excel)<span class="chipnum">2</span></div>
-          <div style="display:flex;gap:5px;margin-bottom:6px"><span class="sbtn gho" style="flex:1;justify-content:center">⬇️ Plantilla</span><span class="sbtn gho" style="flex:1;justify-content:center">⬆️ Cargue</span></div>
-          <div style="font-size:.56rem;color:#8a93a6;font-weight:800;margin:4px 0 2px">Datos (respaldo)<span class="chipnum">3</span></div>
+          <div style="font-size:.56rem;color:#8a93a6;font-weight:800;margin:6px 0 2px">Impresión de tickets<span class="chipnum">2</span></div>
+          <div style="display:flex;gap:6px">
+            <div class="fld" style="flex:1"><span class="fl">Ancho del rollo</span><div class="finput">58 mm (mini térmica)</div></div>
+            <div class="fld" style="flex:1"><span class="fl">Letra del ticket</span><div class="finput">Normal (32)</div></div>
+          </div>
+          <div style="font-size:.56rem;color:#8a93a6;font-weight:800;margin:4px 0 2px">Cartera (clientes y proveedores)<span class="chipnum">3</span></div>
+          <div class="finput" style="text-align:center;font-weight:800;margin-bottom:6px">🧮 Revisar y cuadrar saldos</div>
+          <div style="font-size:.56rem;color:#8a93a6;font-weight:800;margin:4px 0 2px">Cargue masivo (Excel)<span class="chipnum">4</span></div>
+          <div style="display:flex;gap:5px;margin-bottom:6px"><span class="sbtn gho" style="flex:1;justify-content:center">⬇️ Plantilla</span><span class="sbtn gho" style="flex:1;justify-content:center">⬆️ Cargue masivo</span></div>
+          <div style="font-size:.56rem;color:#8a93a6;font-weight:800;margin:4px 0 2px">Datos (respaldo)<span class="chipnum">5</span></div>
           <div style="display:flex;gap:5px;margin-bottom:6px"><span class="sbtn gho" style="flex:1;justify-content:center">⬇️ Exportar</span><span class="sbtn gho" style="flex:1;justify-content:center">⬆️ Importar</span></div>
-          <div class="finput" style="text-align:center;color:#334155;font-weight:800">❓ Ayuda — Ver instructivo<span class="chipnum">4</span></div>
+          <div class="finput" style="text-align:center;color:#334155;font-weight:800">❓ Ayuda — Ver instructivo<span class="chipnum">6</span></div>
         </div>
-        <div class="p-tabs"><div class="t"><span class="i">🏠</span>Inicio</div><div class="t"><span class="i">💵</span>Ventas</div><div class="t"><span class="i">🛒</span>Compras</div><div class="t"><span class="i">📦</span>Invent.</div><div class="t"><span class="i">👥</span>Client.</div><div class="t"><span class="i">⏰</span>Vence</div><div class="t"><span class="i">📊</span>Report.</div></div>
+        <div class="p-tabs"><div class="t"><span class="i">🏠</span>Inicio</div><div class="t"><span class="i">💵</span>Ventas</div><div class="t"><span class="i">📦</span>Invent.</div><div class="t"><span class="i">👥</span>Client.</div><div class="t on"><span class="i">⋯</span>Más</div></div>
         <div class="p-home"><span></span></div>
       </div></div></div>
       <div class="steps-col"><ol class="steps" style="list-style:none;margin:0;padding:0">
         <li class="step"><div class="num">1</div><div><h4>Alertas</h4><p>Define con cuántos días de anticipación avisa un vencimiento y qué tan bajo es “poco stock” para ti.</p></div></li>
-        <li class="step"><div class="num">2</div><div><h4>Cargue masivo</h4><p>Descarga la plantilla en Excel (nombre, precios, stock inicial, lote, vencimiento…), complétala y súbela — ideal para meter todo tu inventario inicial de una sola vez.</p></div></li>
-        <li class="step"><div class="num">3</div><div><h4>Exportar / Importar</h4><p>Descarga una copia de respaldo de todos tus datos (formato de la app), o restaura una copia anterior.</p></div></li>
-        <li class="step"><div class="num">4</div><div><h4>❓ Ayuda</h4><p>Abre esta misma guía en una pestaña nueva, directo desde la app — para consultarla cuando la necesites.</p></div></li>
+        <li class="step"><div class="num">2</div><div><h4>Impresión de tickets</h4><p><b>Ancho del rollo:</b> 58 mm si es la mini térmica portátil, 80 mm si es una de mostrador. <b>Letra del ticket:</b> Grande, Normal o Pequeña. Configúralo una sola vez y todos los recibos y cierres salen así.</p></div></li>
+        <li class="step"><div class="num">3</div><div><h4>🧮 Revisar y cuadrar saldos</h4><p>Compara el saldo guardado de cada cliente y proveedor contra la suma real de sus movimientos. Te muestra las diferencias y, si estás de acuerdo, las corrige. Úsalo si alguna cuenta te parece rara.</p></div></li>
+        <li class="step"><div class="num">4</div><div><h4>Cargue masivo</h4><p>Descarga la plantilla en Excel (nombre, precios, stock inicial, lote, vencimiento…), complétala y súbela — ideal para meter todo tu inventario inicial de una sola vez.</p></div></li>
+        <li class="step"><div class="num">5</div><div><h4>Exportar / Importar</h4><p>Descarga una copia de respaldo de todos tus datos, o restaura una copia anterior. <b>Hazlo cada semana</b> y guarda el archivo en tu correo o en la nube: es tu seguro si se pierde el celular.</p></div></li>
+        <li class="step"><div class="num">6</div><div><h4>❓ Ayuda</h4><p>Abre esta misma guía en una pestaña nueva, directo desde la app — para consultarla cuando la necesites.</p></div></li>
       </ol></div>
     </div>
-    <div class="tipcard"><span class="bulb">💡</span><div><b>El tema claro/oscuro</b> se cambia con el botón 🌙 / ☀️ de la barra lateral (no está dentro de Ajustes).</div></div>
+    <div class="tipcard"><span class="bulb">💡</span><div><b>Las ventanas no se cierran por accidente:</b> si estás en medio de una venta o una compra y tocas fuera de la ventana, no pasa nada — solo se cierra con la <b>✕</b> de la esquina o cuando terminas de guardar. Nunca vas a perder lo que llevabas escrito.</div></div>
   </section>
 
   <footer>
