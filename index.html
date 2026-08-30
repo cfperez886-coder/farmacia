@@ -347,6 +347,7 @@ const cloud = {
       this.status = 'ok'; this.lastSync = new Date(); this.ultimoError='';
       this.subscribe();
       if(this.pendiente) this.doPush();   // cambios que no se pudieron subir antes
+      setTimeout(()=>subirAdjuntosPendientes(), 3000);   // y los adjuntos que sigan en el dispositivo
       updateCloudBadges(); if(cuentaAbierta()) openCuenta();
       toast('Sincronizado con la nube ✓');
     }catch(e){ console.error(e); this.status='error'; updateCloudBadges(); if(cuentaAbierta()) openCuenta(); toast('Error al sincronizar','err'); }
@@ -870,6 +871,29 @@ const sdata = s => esc(String(s||'').toLowerCase()); // texto seguro para el atr
 
 /* ---------- Foto de producto (redimensiona a ~320px y comprime a JPEG) ---------- */
 let fotoTmp = '';
+/* Las fotos de producto solo se ven en miniaturas de ~40 px: guardarlas a 320 px
+   multiplicaba por 8 el peso de los datos sin que se notara en pantalla. */
+const FOTO_LADO = 128, FOTO_CALIDAD = 0.6;
+/* Las facturas y soportes son fotos de papeles: 1600 px es de sobra para leerlos
+   y evita que una foto de celular de 4 MB entre tal cual a la base de datos. */
+const ADJ_LADO = 1600, ADJ_CALIDAD = 0.75;
+
+/* Reduce y recomprime una imagen (data: URL) y devuelve otra data: URL. */
+function recomprimirDataURL(durl, maxLado, calidad){
+  return new Promise(res=>{
+    const img = new Image();
+    img.onload = ()=>{
+      const f = Math.min(1, maxLado/Math.max(img.width, img.height));
+      const c = document.createElement('canvas');
+      c.width = Math.max(1, Math.round(img.width*f)); c.height = Math.max(1, Math.round(img.height*f));
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      try{ res(c.toDataURL('image/jpeg', calidad)); }catch(e){ res(''); }
+    };
+    img.onerror = ()=>res('');
+    img.src = durl;
+  });
+}
+
 function onFoto(input){
   const f = input.files && input.files[0]; if(!f) return;
   if(!f.type.startsWith('image/')) return toast('Selecciona una imagen','err');
@@ -877,11 +901,11 @@ function onFoto(input){
   reader.onload = () => {
     const img = new Image();
     img.onload = () => {
-      const max = 320, scale = Math.min(1, max/Math.max(img.width,img.height));
+      const max = FOTO_LADO, scale = Math.min(1, max/Math.max(img.width,img.height));
       const c = document.createElement('canvas');
       c.width = Math.round(img.width*scale); c.height = Math.round(img.height*scale);
       c.getContext('2d').drawImage(img,0,0,c.width,c.height);
-      fotoTmp = c.toDataURL('image/jpeg', 0.7);
+      fotoTmp = c.toDataURL('image/jpeg', FOTO_CALIDAD);
       const area = document.getElementById('fotoArea'); if(area) area.innerHTML = fotoAreaInner();
     };
     img.src = reader.result;
@@ -897,9 +921,149 @@ function leerAdjunto(input, cb){
   if(!okTipo) return toast('Solo se admiten imágenes o PDF','err');
   if(f.size > 6*1024*1024) return toast('El archivo es muy pesado (máx. 6MB)','err');
   const reader = new FileReader();
-  reader.onload = () => cb({ name:f.name, tipo:f.type, data:reader.result });
+  reader.onload = async () => {
+    // Los PDF pasan tal cual; las fotos se reducen (una foto de celular pesa varios MB)
+    if(!f.type.startsWith('image/')) return cb({ name:f.name, tipo:f.type, data:reader.result });
+    const chica = await recomprimirDataURL(reader.result, ADJ_LADO, ADJ_CALIDAD);
+    const usar = (chica && chica.length < reader.result.length) ? chica : reader.result;
+    cb({ name:f.name, tipo: usar===chica ? 'image/jpeg' : f.type, data:usar });
+  };
   reader.readAsDataURL(f);
 }
+/* ============================================================
+   ADJUNTOS EN LA NUBE (bucket privado "adjuntos")
+   Antes las facturas y los soportes de pago viajaban en base64 DENTRO del
+   documento que se sincroniza, así que todo el paquete se re-subía en cada
+   guardado. Ahora el archivo vive en Storage y en los datos queda solo la ruta.
+   Formato viejo: {name, tipo, data:'data:...'}  ← sigue funcionando
+   Formato nuevo: {name, tipo, path:'<user_id>/facturas/xxx.jpg'}
+   ============================================================ */
+const BUCKET_ADJ = 'adjuntos';
+const _urlAdjCache = new Map();   // path -> {url, expira}
+
+function extDeTipo(tipo){
+  if(tipo==='application/pdf') return 'pdf';
+  const e = (tipo||'').split('/')[1] || 'jpg';
+  return e === 'jpeg' ? 'jpg' : e.replace(/[^a-z0-9]/g,'') || 'jpg';
+}
+
+/* Sube un adjunto {name,tipo,data} y devuelve {name,tipo,path}; null si no se pudo. */
+async function subirAdjunto(obj, carpeta){
+  if(!obj || !obj.data || !cloud.ready || !cloud.sb) return null;
+  const ses = await cloud.sesionValida(); if(!ses) return null;
+  try{
+    const ruta = `${cloud.user.id}/${carpeta}/${uid()}.${extDeTipo(obj.tipo)}`;
+    const blob = dataURLaBlob(obj.data);
+    const { error } = await cloud.sb.storage.from(BUCKET_ADJ)
+      .upload(ruta, blob, { contentType: obj.tipo || 'application/octet-stream', upsert:false });
+    if(error) throw error;
+    return { name:obj.name||'', tipo:obj.tipo||'', path:ruta };
+  }catch(e){ console.error(e); return null; }
+}
+
+/* Enlace temporal (1 hora) para ver el archivo; se guarda en memoria para no pedirlo dos veces. */
+async function urlAdjunto(ref){
+  if(!ref || !ref.path) return '';
+  const c = _urlAdjCache.get(ref.path);
+  if(c && c.expira > Date.now()) return c.url;
+  const ses = await cloud.sesionValida(); if(!ses) return '';
+  try{
+    const { data, error } = await cloud.sb.storage.from(BUCKET_ADJ).createSignedUrl(ref.path, 3600);
+    if(error || !data) throw error || new Error('sin url');
+    _urlAdjCache.set(ref.path, { url:data.signedUrl, expira: Date.now()+3300000 });
+    return data.signedUrl;
+  }catch(e){ console.error(e); return ''; }
+}
+
+/* Abre el adjunto en otra pestaña, venga del formato viejo o del nuevo. */
+async function abrirRefAdjunto(ref){
+  if(!ref) return;
+  if(ref.data){                                   // todavía guardado en el dispositivo
+    try{
+      const url = URL.createObjectURL(dataURLaBlob(ref.data));
+      window.open(url, '_blank');
+      setTimeout(()=>URL.revokeObjectURL(url), 60000);
+    }catch(e){ console.error(e); toast('No se pudo abrir el adjunto','err'); }
+    return;
+  }
+  if(!ref.path) return toast('Adjunto no disponible','err');
+  if(!cloud.user) return toast('Conéctate a la nube para ver este adjunto','err');
+  const v = window.open('about:blank', '_blank');  // se abre YA para que no lo bloquee el navegador
+  const url = await urlAdjunto(ref);
+  if(!url){ if(v) v.close(); return toast('No se pudo abrir el adjunto (¿sin conexión?)','err'); }
+  if(v) v.location = url; else window.open(url, '_blank');
+}
+function abrirFacturaCompra(compraId){
+  const c = (DB.compras||[]).find(x=>x.id===compraId);
+  if(c && c.factura) abrirRefAdjunto(c.factura);
+}
+function abrirSoportePago(provId, movId){
+  const p = getProveedor(provId);
+  const m = p && (p.movs||[]).find(x=>x.id===movId);
+  if(m && m.soporte) abrirRefAdjunto(m.soporte);
+}
+function etiquetaAdjunto(ref, queEs){
+  if(!ref) return '';
+  const esImg = (ref.tipo||'').startsWith('image/');
+  return `📎 ${esImg?'Ver':'Descargar'} ${queEs}${ref.data?' <span class="text-[10px] text-amber-600">· sin subir</span>':''}`;
+}
+
+/* ---- Migración / mantenimiento ---- */
+function refsAdjuntosLocales(){
+  const lista = [];
+  (DB.compras||[]).forEach(c=>{ if(c.factura && c.factura.data) lista.push({ ref:c.factura, carpeta:'facturas' }); });
+  (DB.proveedores||[]).forEach(p=>(p.movs||[]).forEach(m=>{ if(m.soporte && m.soporte.data) lista.push({ ref:m.soporte, carpeta:'soportes' }); }));
+  (DB.clientes||[]).forEach(c=>(c.movs||[]).forEach(m=>{ if(m.soporte && m.soporte.data) lista.push({ ref:m.soporte, carpeta:'soportes' }); }));
+  return lista;
+}
+const pesoAdjuntosLocales = () => refsAdjuntosLocales().reduce((s,x)=>s+((x.ref.data||'').length), 0);
+const pesoFotosProducto  = () => (DB.productos||[]).reduce((s,p)=>s+((p.foto||'').length), 0);
+const pesoDatos          = () => JSON.stringify(DB).length;
+
+let subiendoAdjuntos = false;
+/* Sube a Storage todo adjunto que siga en base64 y lo reemplaza por su ruta.
+   El base64 SOLO se borra cuando Storage confirmó la subida: si falla, no se pierde nada. */
+async function subirAdjuntosPendientes(onProgreso){
+  if(subiendoAdjuntos) return { subidos:0, fallidos:0, liberado:0 };
+  if(!cloud.ready || !cloud.user || !navigator.onLine) return { subidos:0, fallidos:0, liberado:0 };
+  subiendoAdjuntos = true;
+  let subidos=0, fallidos=0, liberado=0;
+  try{
+    const lista = refsAdjuntosLocales();
+    for(let i=0;i<lista.length;i++){
+      const { ref, carpeta } = lista[i];
+      if(onProgreso) onProgreso(i+1, lista.length, ref.name||'archivo');
+      const peso = (ref.data||'').length;
+      const r = await subirAdjunto(ref, carpeta);
+      if(r){ ref.path = r.path; delete ref.data; subidos++; liberado += peso; }
+      else fallidos++;
+    }
+    if(subidos){ store.save(); render(); }
+  }catch(e){ console.error(e); }
+  finally{ subiendoAdjuntos = false; }
+  return { subidos, fallidos, liberado };
+}
+let timerAdjuntos = null;
+function programarSubidaAdjuntos(){ clearTimeout(timerAdjuntos); timerAdjuntos = setTimeout(()=>subirAdjuntosPendientes(), 4000); }
+
+/* Recomprime las fotos de producto viejas al tamaño en que realmente se ven. */
+async function optimizarFotos(onProgreso){
+  const ps = (DB.productos||[]).filter(p=>fotoSrc(p.foto));
+  let cambiadas=0, antes=0, despues=0;
+  for(let i=0;i<ps.length;i++){
+    const p = ps[i];
+    if(onProgreso) onProgreso(i+1, ps.length, p.nombre||'');
+    antes += p.foto.length;
+    const chica = await recomprimirDataURL(p.foto, FOTO_LADO, FOTO_CALIDAD);
+    // Solo se reemplaza si el ahorro vale la pena: recomprimir un JPEG una y otra vez
+    // le va quitando calidad sin ganar prácticamente nada.
+    if(chica && chica.length < p.foto.length*0.9){ p.foto = chica; cambiadas++; }
+    despues += p.foto.length;
+  }
+  if(cambiadas){ store.save(); render(); }
+  return { cambiadas, antes, despues, total: ps.length };
+}
+
 function adjuntoAreaInner(obj, tipoLabel, onQuitar, inputId, onChange){
   return obj && obj.data
     ? `<div class="flex items-center gap-2 bg-slate-50 rounded-xl px-3 py-2 text-sm"><span class="flex-1 truncate">📎 ${esc(obj.name||tipoLabel)}</span>
@@ -1500,6 +1664,7 @@ function saveAbonoProv(e,id){
   p.saldo=Math.max(0,(p.saldo||0)-n);
   p.movs=p.movs||[]; p.movs.push({id:uid(),fecha:todayISO(),tipo:'abono',monto:n,medioPago,soporte:{...abonoSoporteTmp},aplicaA});
   abonoSoporteTmp={name:'',tipo:'',data:''};
+  programarSubidaAdjuntos();   // el soporte se va a Storage en segundo plano
   store.save(); closeModal(); render(); toast('Pago registrado');
   return false;
 }
@@ -1539,7 +1704,7 @@ function openEstadoCuentaProv(id){
           return `<div class="border-b border-slate-100 pb-2">
             <div class="flex justify-between text-sm"><span>${fmtDate(m.fecha)} · Pago realizado${m.medioPago?` <span class="text-xs text-slate-400 font-normal">· ${esc(m.medioPago)}</span>`:''}</span><span class="font-semibold text-teal-600">−${fmtMoney(m.monto)}</span></div>
             ${(m.aplicaA&&m.aplicaA.length)?`<div class="text-xs text-slate-400 mt-0.5">Aplicado a: ${m.aplicaA.map(a=>`${esc(a.etiqueta)} (${fmtMoney(a.monto)})`).join(', ')}</div>`:''}
-            ${m.soporte&&m.soporte.data?`<div class="mt-0.5">${m.soporte.tipo&&m.soporte.tipo.startsWith('image/')?`<a href="${m.soporte.data}" target="_blank" class="text-xs text-brand-700 font-medium">📎 Ver soporte</a>`:`<a href="${m.soporte.data}" download="${esc(m.soporte.name||'soporte.pdf')}" class="text-xs text-brand-700 font-medium">📎 Descargar soporte</a>`}</div>`:''}
+            ${(m.soporte&&(m.soporte.data||m.soporte.path))?`<div class="mt-0.5"><button type="button" onclick="abrirSoportePago('${p.id}','${m.id}')" class="text-xs text-brand-700 font-medium underline">${etiquetaAdjunto(m.soporte,'soporte')}</button></div>`:''}
           </div>`;
         }
         return `<div class="flex justify-between text-sm border-b border-slate-100 pb-2"><span>${fmtDate(m.fecha)} · Compra anulada</span><span class="font-semibold text-teal-600">−${fmtMoney(m.monto)}</span></div>`;
@@ -2081,6 +2246,48 @@ function openCierre(desde,hasta){
 function printCierre(desde,hasta){ printTicket(cierreTexto(desde,hasta)); }
 function imagenCierre(desde,hasta){ ticketImagen(cierreTexto(desde,hasta), 'cierre-'+(desde||todayISO())); }
 
+/* ---------- Aligerar datos ----------
+   Muestra cuánto pesan los adjuntos y las fotos, y deja moverlos/optimizarlos. */
+const kb = n => (n/1024) >= 1024 ? (n/1048576).toFixed(2)+' MB' : Math.round(n/1024)+' KB';
+function cuerpoAdjuntos(msg){
+  const nPend = refsAdjuntosLocales().length;
+  const pAdj = pesoAdjuntosLocales(), pFotos = pesoFotosProducto(), pTotal = pesoDatos();
+  const otros = Math.max(0, pTotal - pAdj - pFotos);
+  const barra = (v,color) => `<div class="h-2 rounded-full ${color}" style="width:${pTotal?Math.max(1,Math.round(v/pTotal*100)):0}%"></div>`;
+  return `
+    <p class="text-sm text-slate-500 mb-3">Cada vez que guardas algo, la app sube <b>todos</b> tus datos a la nube. Entre más pesen los adjuntos, más lenta va la sincronización.</p>
+    <div class="card p-3 mb-3">
+      <div class="flex justify-between text-sm mb-2"><span class="font-semibold">Peso total</span><span class="font-bold">${kb(pTotal)}</span></div>
+      <div class="flex gap-1 mb-2">${barra(pAdj,'bg-rose-400')}${barra(pFotos,'bg-amber-400')}${barra(otros,'bg-teal-400')}</div>
+      <div class="flex justify-between text-xs py-0.5"><span class="text-slate-500">🔴 Facturas y soportes sin subir (${nPend})</span><span class="font-medium">${kb(pAdj)}</span></div>
+      <div class="flex justify-between text-xs py-0.5"><span class="text-slate-500">🟡 Fotos de producto</span><span class="font-medium">${kb(pFotos)}</span></div>
+      <div class="flex justify-between text-xs py-0.5"><span class="text-slate-500">🟢 Ventas, compras, clientes…</span><span class="font-medium">${kb(otros)}</span></div>
+    </div>
+    <div id="adjMsg" class="text-xs mb-3 min-h-[18px] text-slate-500">${msg||''}</div>
+    <button id="btnSubirAdj" onclick="accionSubirAdjuntos()" ${(!cloud.user||!nPend)?'disabled':''}
+      class="w-full bg-brand hover:bg-brand-700 disabled:bg-slate-200 disabled:text-slate-500 text-white font-semibold py-2.5 rounded-xl mb-2">☁️ Mover ${nPend} adjunto(s) a la nube</button>
+    <button id="btnOptFotos" onclick="accionOptimizarFotos()" class="w-full border border-slate-200 rounded-xl py-2.5 text-sm hover:bg-slate-50">🖼️ Optimizar fotos de producto</button>
+    <p class="text-[11px] text-slate-400 mt-3">${cloud.user?'Los archivos quedan guardados en tu cuenta de la nube, privados, y se abren cuando los necesites. El archivo solo se quita del dispositivo cuando la nube confirma que lo recibió.':'Conéctate a la nube para poder mover los adjuntos.'}</p>`;
+}
+function openAdjuntos(){ openModal('📦 Aligerar datos', cuerpoAdjuntos()); }
+function adjMsg(t){ const e=document.getElementById('adjMsg'); if(e) e.innerHTML=t; }
+async function accionSubirAdjuntos(){
+  const b=document.getElementById('btnSubirAdj'); if(b) b.disabled=true;
+  const antes = pesoDatos();
+  const r = await subirAdjuntosPendientes((i,n,nombre)=>adjMsg(`Subiendo ${i} de ${n}: ${esc(nombre)}…`));
+  const ahorro = antes - pesoDatos();
+  openModal('📦 Aligerar datos', cuerpoAdjuntos(
+    r.subidos ? `<span class="text-teal-700 font-medium">✓ ${r.subidos} adjunto(s) en la nube · ${kb(ahorro)} menos en cada sincronización.</span>${r.fallidos?` <span class="text-rose-600">${r.fallidos} no se pudieron subir; se reintentará.</span>`:''}`
+              : (r.fallidos ? `<span class="text-rose-600">No se pudo subir ninguno. Revisa la conexión e intenta de nuevo.</span>` : 'No hay adjuntos pendientes.')));
+}
+async function accionOptimizarFotos(){
+  const b=document.getElementById('btnOptFotos'); if(b) b.disabled=true;
+  const r = await optimizarFotos((i,n,nombre)=>adjMsg(`Optimizando foto ${i} de ${n}: ${esc(nombre)}…`));
+  openModal('📦 Aligerar datos', cuerpoAdjuntos(
+    r.cambiadas ? `<span class="text-teal-700 font-medium">✓ ${r.cambiadas} de ${r.total} foto(s) optimizadas · ${kb(r.antes-r.despues)} menos.</span>`
+                : 'Las fotos ya estaban optimizadas.'));
+}
+
 /* ---------- Cuadre de cartera ----------
    Compara el saldo guardado contra el que dicen los movimientos y permite repararlo. */
 function revisarCuadre(){
@@ -2267,6 +2474,7 @@ function confirmCompra(){
     prov.movs.push({id:uid(),fecha:todayISO(),tipo:'credito',monto:total,pagado:0,compraId:compra.id,items:nombres,plazoMeses,vence:venceCredito,numeroFactura});
   }
   compraFacturaTmp={name:'',tipo:'',data:''};
+  programarSubidaAdjuntos();   // la factura se va a Storage en segundo plano
   carritoC=[];                       // el carrito ya se convirtio en compra
   store.save(); closeModal(); render(); toast('Compra registrada ✔');
 }
@@ -2275,7 +2483,7 @@ function verCompra(id){
   openModal('Detalle de compra',
     `<div class="text-sm text-slate-400 mb-1">${fmtDate(c.fecha)} · ${esc(c.proveedor||'Proveedor')}${c.credito?` · <span class="text-rose-600">Crédito${c.venceCredito?` · pagar antes del ${fmtDate(c.venceCredito)}`:''}</span>`:` · ${esc(c.medioPago||'Efectivo')}`}</div>
      ${c.numeroFactura?`<div class="text-sm text-slate-400 mb-1">N° factura: <span class="text-slate-600 font-medium">${esc(c.numeroFactura)}</span></div>`:''}
-     ${c.factura&&c.factura.data?`<div class="mb-3">${c.factura.tipo&&c.factura.tipo.startsWith('image/')?`<a href="${c.factura.data}" target="_blank" class="text-xs text-brand-700 font-medium">📎 Ver factura adjunta</a>`:`<a href="${c.factura.data}" download="${esc(c.factura.name||'factura.pdf')}" class="text-xs text-brand-700 font-medium">📎 Descargar factura adjunta</a>`}</div>`:''}
+     ${(c.factura&&(c.factura.data||c.factura.path))?`<div class="mb-3"><button type="button" onclick="abrirFacturaCompra('${c.id}')" class="text-xs text-brand-700 font-medium underline">${etiquetaAdjunto(c.factura,'factura adjunta')}</button></div>`:''}
      <div class="space-y-2 mb-3">${c.items.map(i=>{const p=getProducto(i.prodId);return `<div class="flex justify-between text-sm"><span>${esc(p?.nombre||'(eliminado)')} × ${i.cant}${i.lote?` <span class="text-xs text-slate-400">· Lote ${esc(i.lote)}</span>`:''}${i.venc?` <span class="text-xs text-slate-400">(${fmtDate(i.venc)})</span>`:''}</span><span>${fmtMoney(i.cant*i.costo)}</span></div>`;}).join('')}</div>
      <div class="flex justify-between font-bold border-t border-slate-100 pt-2"><span>Total</span><span>${fmtMoney(c.total)}</span></div>
      <button onclick="delCompra('${id}')" class="mt-4 w-full border border-rose-200 text-rose-600 py-2.5 rounded-xl text-sm">Anular compra (quita stock)</button>`);
@@ -2517,6 +2725,10 @@ function openConfig(){
        ${field('Letra del ticket',`<select id="cfgCPL" class="${inputCls}">${CPL_OPCIONES.map(o=>`<option value="${o.v}"${ticketCPL()===o.v?' selected':''}>${o.t} (${o.v} caracteres)</option>`).join('')}</select>`)}
      </div>
      <button onclick="saveConfig()" class="w-full bg-brand text-white font-semibold py-2.5 rounded-xl mb-4">Guardar ajustes</button>
+     <div class="border-t border-slate-100 pt-4 mb-4">
+       <p class="text-xs text-slate-400 mb-2">Adjuntos y fotos</p>
+       <button onclick="openAdjuntos()" class="w-full border border-slate-200 rounded-xl py-2.5 text-sm hover:bg-slate-50">📦 Aligerar datos (adjuntos y fotos)</button>
+     </div>
      <div class="border-t border-slate-100 pt-4 mb-4">
        <p class="text-xs text-slate-400 mb-2">Cartera (clientes y proveedores)</p>
        <button onclick="openCuadre()" class="w-full border border-slate-200 rounded-xl py-2.5 text-sm hover:bg-slate-50">🧮 Revisar y cuadrar saldos</button>
