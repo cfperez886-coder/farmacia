@@ -1974,10 +1974,12 @@ function verVenta(id){
      <div class="flex justify-between text-sm text-teal-600 mt-1"><span>Ganancia</span><span>+${fmtMoney(v.ganancia)}</span></div>
      <div class="flex gap-2 mt-4">
        <button onclick="waVenta('${id}')" class="flex-1 bg-teal-600 hover:bg-teal-700 text-white py-2.5 rounded-xl text-sm font-semibold">📲 WhatsApp</button>
+       <button onclick="imagenVenta('${id}')" title="Genera el recibo como imagen para tu mini impresora térmica" class="flex-1 ${esCelular()?'bg-brand hover:bg-brand-700 text-white font-semibold':'border border-slate-200 hover:bg-slate-50'} py-2.5 rounded-xl text-sm">🖼️ Imagen</button>
        <button onclick="printVenta('${id}')" class="flex-1 border border-slate-200 hover:bg-slate-50 py-2.5 rounded-xl text-sm">🖨️ Imprimir</button>
-       <button onclick="imagenVenta('${id}')" title="Genera el recibo como imagen para tu mini impresora térmica" class="flex-1 border border-slate-200 hover:bg-slate-50 py-2.5 rounded-xl text-sm">🖼️ Imagen</button>
      </div>
-     <p class="text-[11px] text-slate-400 mt-1">🖼️ Imagen = ticket para la mini impresora: guárdalo en Fotos y ábrelo desde Fun Print.</p>
+     <p class="text-[11px] text-slate-400 mt-1">${esCelular()
+        ? '🖼️ <b>Imagen</b> es el camino para la mini impresora térmica. 🖨️ Imprimir sirve para una impresora normal del sistema.'
+        : '🖼️ Imagen = ticket para la mini impresora; 🖨️ Imprimir usa la impresora del computador.'}</p>
      <button onclick="delVenta('${id}')" class="mt-2 w-full border border-rose-200 text-rose-600 py-2.5 rounded-xl text-sm">Anular venta (devuelve stock)</button>`);
 }
 
@@ -2032,11 +2034,32 @@ function ticketHTML(texto){
     @media print{ html,body{ width:${m.mm}mm } }
   </style></head><body><pre>${esc(ticketTexto(texto))}</pre></body></html>`;
 }
+/* ¿En qué celular estamos? Cambia el camino correcto para llegar a la impresora. */
+const esAndroid = () => /Android/i.test(navigator.userAgent);
+const esIOS = () => /iPad|iPhone|iPod/.test(navigator.userAgent)
+                 || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const esCelular = () => esAndroid() || esIOS();
+
+/* Imprime desde un marco oculto en vez de una ventana emergente.
+   En el celular (sobre todo Android) las emergentes vienen bloqueadas y el botón
+   "Imprimir" no hacía absolutamente nada: solo salía el aviso de permitirlas. */
 function printTicket(texto){
-  const w=window.open('','_blank','width=380,height=600'); if(!w) return toast('Permite ventanas emergentes para imprimir','err');
-  w.document.write(ticketHTML(texto));
-  w.document.close(); w.focus();
-  setTimeout(()=>{ try{ w.print(); }catch(e){} }, 300);
+  const viejo = document.getElementById('marcoImpresion');
+  if(viejo) viejo.remove();
+  const f = document.createElement('iframe');
+  f.id = 'marcoImpresion';
+  f.setAttribute('aria-hidden','true');
+  f.setAttribute('title','Ticket para imprimir');
+  f.style.cssText = 'position:fixed;right:0;bottom:0;width:1px;height:1px;border:0;opacity:0';
+  f.onload = ()=>{
+    try{
+      const v = f.contentWindow;
+      v.focus();
+      setTimeout(()=>{ try{ v.print(); }catch(e){ console.error(e); toast('Tu navegador no pudo abrir la impresión. Usa “Imagen”.','err'); } }, 250);
+    }catch(e){ console.error(e); toast('Tu navegador no pudo abrir la impresión. Usa “Imagen”.','err'); }
+  };
+  document.body.appendChild(f);
+  f.srcdoc = ticketHTML(texto);
 }
 // Genera el ticket como PNG del ancho EXACTO del cabezal (384/576 px) para compartirlo
 // a la app de la impresora (Fun Print y similares imprimen imagenes).
@@ -2091,11 +2114,14 @@ function ticketImagen(texto, nombre){
   const cv = ticketCanvas(texto);
   const durl = cv.toDataURL('image/png');
   const archivo = (nombre||'ticket')+'.png';
+  ticketParaCompartir = { durl, archivo };   // por si hay que reintentar el compartir
   try{
     const file = new File([dataURLaBlob(durl)], archivo, {type:'image/png'});
     if(navigator.canShare && navigator.canShare({files:[file]})){
       navigator.share({files:[file], title:'Ticket'})
-        .then(()=> toast('Si no ves tu impresora, elige “Guardar imagen” y ábrela desde Fun Print'))
+        .then(()=> toast(esAndroid()
+          ? 'Elige Fun Print en la lista; si no aparece, “Guardar imagen” y ábrela desde la app'
+          : 'Si no ves tu impresora, elige “Guardar imagen” y ábrela desde Fun Print'))
         .catch(e=>{ if(!e || e.name!=='AbortError') verTicketImagen(durl, archivo); });
       return;
     }
@@ -2104,25 +2130,57 @@ function ticketImagen(texto, nombre){
 }
 // Respaldo: muestra la imagen para guardarla manteniéndola pulsada (iOS) o descargarla
 function verTicketImagen(durl, archivo){
+  // La descarga va por blob: — en Chrome de Android una data: URL grande puede
+  // fallar en silencio y el usuario se queda sin ticket.
+  let href = durl;
+  try{ href = URL.createObjectURL(dataURLaBlob(durl)); setTimeout(()=>{ try{ URL.revokeObjectURL(href); }catch(e){} }, 120000); }
+  catch(e){ console.error(e); }
+  const guardar = esAndroid()
+    ? 'En el celular: mantén pulsada la imagen y elige “Descargar imagen”.'
+    : 'En el celular: mantén pulsada la imagen y elige “Añadir a Fotos”.';
   openModal('Ticket listo para imprimir',
     `${pasosImpresion()}
      <div class="bg-white border border-slate-200 rounded-xl p-2 flex justify-center mb-3">
        <img src="${durl}" alt="Ticket" style="width:${ticketMedidas().dots===576?288:230}px;image-rendering:pixelated" class="max-w-full">
      </div>
-     <p class="text-xs text-slate-400 mb-2 text-center">En el celular: mantén pulsada la imagen y elige “Añadir a Fotos”.</p>
-     <a href="${durl}" download="${esc(archivo)}" class="block w-full text-center bg-brand hover:bg-brand-700 text-white font-semibold py-2.5 rounded-xl">⬇️ Descargar imagen</a>`);
+     <p class="text-xs text-slate-400 mb-2 text-center">${guardar}</p>
+     <div class="flex gap-2">
+       <a href="${href}" download="${esc(archivo)}" class="flex-1 text-center bg-brand hover:bg-brand-700 text-white font-semibold py-2.5 rounded-xl">⬇️ Descargar</a>
+       <button type="button" onclick="compartirTicketDeNuevo()" class="flex-1 border border-slate-200 hover:bg-slate-50 py-2.5 rounded-xl text-sm">📤 Compartir</button>
+     </div>`);
 }
-/* Las apps de estas mini impresoras (Fun Print y similares) normalmente NO aparecen en el
-   menú de compartir de iOS: hay que guardar la imagen en Fotos y elegirla desde la app. */
+/* Reintenta el menú de compartir desde el respaldo (el clic da el "gesto" que exige el navegador). */
+let ticketParaCompartir = null;
+function compartirTicketDeNuevo(){
+  if(!ticketParaCompartir) return toast('Vuelve a generar el ticket','err');
+  const { durl, archivo } = ticketParaCompartir;
+  try{
+    const file = new File([dataURLaBlob(durl)], archivo, {type:'image/png'});
+    if(navigator.canShare && navigator.canShare({files:[file]})){
+      navigator.share({files:[file], title:'Ticket'}).catch(e=>{ if(e && e.name!=='AbortError') toast('No se pudo compartir','err'); });
+      return;
+    }
+  }catch(e){ console.error(e); }
+  toast('Este navegador no permite compartir archivos. Usa “Descargar”.','err');
+}
+/* Los pasos cambian según el celular:
+   - Android: las apps sí se registran en el menú de compartir, así que Fun Print
+     aparece ahí directamente y no hay que pasar por la galería.
+   - iPhone: Fun Print NO registra extensión de compartir, toca guardar en Fotos. */
 function pasosImpresion(){
+  const mm = ticketMedidas().mm;
+  const pasos = esAndroid()
+    ? [`Toca <b>Compartir</b> y elige <b>Fun Print</b> en la lista de apps.`,
+       `Si no la ves, toca <b>Guardar imagen</b> (o “Descargar”) y ábrela luego desde Fun Print.`,
+       `En Fun Print, conecta la impresora por <b>Bluetooth</b> y elige la imagen.`,
+       `Imprime. Si la app ofrece tamaño, usa el ancho completo del papel.`]
+    : [`Guarda esta imagen en <b>Fotos</b>.`,
+       `Abre la app de la impresora (<b>Fun Print</b>) y conéctala por Bluetooth.`,
+       `Elige <b>Imagen / Foto / Álbum</b> y selecciona el ticket.`,
+       `Imprime. Si la app ofrece tamaño, usa el ancho completo del papel.`];
   return `<div class="bg-brand-50 rounded-xl p-3 mb-3">
-      <p class="text-xs font-semibold text-brand-700 mb-1">Cómo imprimir en la mini impresora (${ticketMedidas().mm} mm)</p>
-      <ol class="text-xs text-slate-600 list-decimal pl-4 space-y-0.5">
-        <li>Guarda esta imagen en <b>Fotos</b>.</li>
-        <li>Abre la app de la impresora (<b>Fun Print</b>) y conéctala por Bluetooth.</li>
-        <li>Elige <b>Imagen / Foto / Álbum</b> y selecciona el ticket.</li>
-        <li>Imprime. Si la app ofrece tamaño, usa el ancho completo del papel.</li>
-      </ol>
+      <p class="text-xs font-semibold text-brand-700 mb-1">Cómo imprimir en la mini impresora (${mm} mm)</p>
+      <ol class="text-xs text-slate-600 list-decimal pl-4 space-y-0.5">${pasos.map(x=>`<li>${x}</li>`).join('')}</ol>
     </div>`;
 }
 function printVenta(id){
@@ -2282,8 +2340,8 @@ function openCierre(desde,hasta){
     +`${d.esHoy?`<button onclick="openGasto()" class="w-full mt-3 text-xs text-slate-500 border border-slate-200 rounded-xl py-2 hover:bg-slate-50">💸 Registrar un gasto de hoy</button>`:''}
      <div class="flex gap-2 mt-2">
        <button onclick="window.open('https://wa.me/?text='+encodeURIComponent(cierreTexto('${d.desde}','${d.hasta}')),'_blank')" class="flex-1 bg-teal-600 hover:bg-teal-700 text-white py-2.5 rounded-xl text-sm font-semibold">📲 WhatsApp</button>
+       <button onclick="imagenCierre('${d.desde}','${d.hasta}')" title="Guarda el cierre como imagen para enviarlo a la app de tu mini impresora" class="flex-1 ${esCelular()?'bg-brand hover:bg-brand-700 text-white font-semibold':'border border-slate-200 hover:bg-slate-50'} py-2.5 rounded-xl text-sm">🖼️ Imagen</button>
        <button onclick="printCierre('${d.desde}','${d.hasta}')" class="flex-1 border border-slate-200 hover:bg-slate-50 py-2.5 rounded-xl text-sm">🖨️ Imprimir</button>
-       <button onclick="imagenCierre('${d.desde}','${d.hasta}')" title="Guarda el cierre como imagen para enviarlo a la app de tu mini impresora" class="flex-1 border border-slate-200 hover:bg-slate-50 py-2.5 rounded-xl text-sm">🖼️ Imagen</button>
      </div>`);
 }
 function printCierre(desde,hasta){ printTicket(cierreTexto(desde,hasta)); }
