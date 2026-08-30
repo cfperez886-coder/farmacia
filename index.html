@@ -313,23 +313,27 @@ const cloud = {
     return 'ok';
   },
   async signOut(){ if(this.sb) await this.sb.auth.signOut(); },
-  /* Asegura un token vigente ANTES de tocar la nube.
-     El token de acceso dura 1 hora; si la app estuvo minimizada o se cayó la señal,
-     la renovación puede no haber ocurrido y la petición sale SIN sesión: entonces
-     Postgres la rechaza con "new row violates row-level security policy" (error 401).
-     Esa era la causa del "Error de sync". */
-  async sesionValida(){
-    try{
-      const { data } = await this.sb.auth.getSession();
-      let s = data && data.session;
-      const vencido = s && s.expires_at && (s.expires_at*1000 < Date.now()+60000); // 1 min de margen
-      if(!s || vencido){
+  /* Renueva la sesión. Se llama SOLO cuando el servidor rechazó la petición por
+     credencial vencida — nunca "por si acaso".
+     Por qué: supabase-js protege la sesión con un cerrojo (navigator.locks) y ya
+     renueva el token solo. Consultarla antes de cada operación creaba contención;
+     si el cerrojo se trababa (típico en celular al volver de segundo plano), la app
+     daba "error de sincronización" SIN haber intentado guardar nada.
+     Además, dos renovaciones a la vez se pisan (el token de refresco es de un solo
+     uso), así que aquí todas comparten la misma promesa. */
+  _renovando: null,
+  async renovarSesion(){
+    if(this._renovando) return this._renovando;
+    this._renovando = (async ()=>{
+      try{
         const r = await this.sb.auth.refreshSession();
-        s = (r && r.data && r.data.session) || null;
-      }
-      if(s && s.user) this.user = s.user;
-      return s;
-    }catch(e){ console.error(e); return null; }
+        const s = (r && r.data && r.data.session) || null;
+        if(s && s.user) this.user = s.user;
+        return s;
+      }catch(e){ console.error(e); return null; }
+      finally{ setTimeout(()=>{ this._renovando = null; }, 0); }
+    })();
+    return this._renovando;
   },
   async afterLogin(){
     this.status = 'sync'; updateCloudBadges();
@@ -375,42 +379,65 @@ const cloud = {
     clearTimeout(this.reintentoTimer); this.reintentoTimer=null;
     try{
       this.status='sync'; updateCloudBadges();
-      const ses = await this.sesionValida();
-      if(!ses) throw new Error('sesion-vencida');
-      const { error } = await this.sb.from('negocio_datos').upsert({ user_id:this.user.id, data:DB, updated_at:new Date().toISOString() });
+      // Se intenta DIRECTO: supabase-js ya se encarga de poner un token vigente.
+      let error = await this.subirDoc();
+      // Solo si el servidor dice que la credencial no sirve, se renueva y se reintenta una vez.
+      if(error && esErrorDeSesion(error)){
+        const s = await this.renovarSesion();
+        if(s) error = await this.subirDoc();
+      }
       if(error) throw error;
-      this.pendiente=false; this.reintento=0; this.ultimoError='';
+      this.pendiente=false; this.reintento=0; this.fallosSeguidos=0; this.ultimoError='';
       this.status='ok'; this.lastSync=new Date(); updateCloudBadges(); if(cuentaAbierta()) openCuenta();
     }catch(e){
       console.error(e);
       this.ultimoError = mensajeSync(e);
-      this.status='error'; updateCloudBadges(); if(cuentaAbierta()) openCuenta();
+      // Un tropiezo suelto no se le muestra al usuario: se reintenta en silencio.
+      // Solo a partir del segundo fallo seguido aparece el aviso.
+      this.fallosSeguidos = (this.fallosSeguidos||0) + 1;
+      this.status = this.fallosSeguidos >= 2 ? 'error' : 'sync';
+      updateCloudBadges(); if(cuentaAbierta()) openCuenta();
       this.programarReintento();
     }
   },
+  async subirDoc(){
+    try{
+      const { error } = await this.sb.from('negocio_datos')
+        .upsert({ user_id:this.user.id, data:DB, updated_at:new Date().toISOString() });
+      return error || null;
+    }catch(e){ return e; }
+  },
   // Reintenta solo, esperando cada vez un poco más (3s, 6s, 12s… hasta 1 minuto).
+  // Tras 6 intentos deja de insistir: seguirá cuando vuelva la conexión, al volver
+  // a la app o con el botón "Reintentar ahora". Así no molesta cada pocos segundos.
   programarReintento(){
     if(!this.pendiente || !this.user) return;
     clearTimeout(this.reintentoTimer);
+    if(this.reintento >= 6){ this.status='error'; updateCloudBadges(); return; }
     const espera = Math.min(60000, 3000 * Math.pow(2, this.reintento++));
     this.reintentoTimer = setTimeout(()=>this.doPush(), espera);
   },
   // Botón "Reintentar ahora" de la ventana de Cuenta
-  reintentarYa(){ this.reintento=0; this.pendiente=true; this.doPush(); },
+  reintentarYa(){ this.reintento=0; this.fallosSeguidos=0; this.pendiente=true; this.doPush(); },
   async pull(silencioso=false){
     if(!this.user) return;
     this.status='sync'; updateCloudBadges();
     try{
-      const ses = await this.sesionValida();
-      if(!ses) throw new Error('sesion-vencida');
-      const { data, error } = await this.sb.from('negocio_datos').select('data').eq('user_id', this.user.id).maybeSingle();
+      let { data, error } = await this.sb.from('negocio_datos').select('data').eq('user_id', this.user.id).maybeSingle();
+      if(error && esErrorDeSesion(error)){
+        const s = await this.renovarSesion();
+        if(s) ({ data, error } = await this.sb.from('negocio_datos').select('data').eq('user_id', this.user.id).maybeSingle());
+      }
       if(error) throw error;
       if(data && data.data && JSON.stringify(data.data)!==JSON.stringify(DB)) this.applyRemote(data.data);
-      this.ultimoError='';
+      this.ultimoError=''; this.fallosSeguidos=0;
       this.status='ok'; this.lastSync=new Date(); updateCloudBadges(); if(cuentaAbierta()) openCuenta();
       if(!silencioso) toast('Datos actualizados desde la nube');
       if(this.pendiente) this.doPush();   // si algo quedó sin subir, aprovecha que hay conexión
-    }catch(e){ console.error(e); this.ultimoError=mensajeSync(e); this.status='error'; updateCloudBadges(); if(cuentaAbierta()) openCuenta(); if(!silencioso) toast(this.ultimoError,'err'); }
+    }catch(e){ console.error(e); this.ultimoError=mensajeSync(e);
+      // Bajar datos es menos crítico que subirlos: si falla en silencio, no se alarma al usuario.
+      if(!silencioso){ this.status='error'; toast(this.ultimoError,'err'); }
+      updateCloudBadges(); if(cuentaAbierta()) openCuenta(); }
   },
   subscribe(){
     this.unsubscribe();
@@ -441,9 +468,17 @@ function updateCloudBadges(){
   const info = cloudStatusInfo();
   document.querySelectorAll('.cloudBadgeInner').forEach(el=>{ el.textContent = info.icon+' '+info.text; el.style.color = info.hex; });
 }
+/* ¿El servidor rechazó la petición por credencial vencida? (401 / 42501 / JWT) */
+function esErrorDeSesion(err){
+  const t = ((err && (err.message||'')) + ' ' + (err && (err.code||''))).toLowerCase();
+  return t.includes('42501') || t.includes('row-level') || t.includes('row level')
+      || t.includes('jwt') || t.includes('401') || t.includes('unauthorized');
+}
 /* Traduce el fallo de sincronización a algo que el usuario pueda entender y accionar. */
 function mensajeSync(err){
   const m = ((err && (err.message || err.code)) || '').toString().toLowerCase();
+  if(m.includes('lock') || m.includes('navigatorlock'))
+    return 'El dispositivo estaba ocupado. Se reintentará solo en unos segundos.';
   if(m.includes('sesion-vencida') || m.includes('jwt') || m.includes('42501') || m.includes('row-level') || m.includes('row level'))
     return 'Tu sesión se venció. Cierra sesión y vuelve a entrar para subir los cambios.';
   if(!navigator.onLine || m.includes('failed to fetch') || m.includes('networkerror') || m.includes('network request'))
@@ -949,13 +984,17 @@ function extDeTipo(tipo){
 
 /* Sube un adjunto {name,tipo,data} y devuelve {name,tipo,path}; null si no se pudo. */
 async function subirAdjunto(obj, carpeta){
-  if(!obj || !obj.data || !cloud.ready || !cloud.sb) return null;
-  const ses = await cloud.sesionValida(); if(!ses) return null;
-  try{
-    const ruta = `${cloud.user.id}/${carpeta}/${uid()}.${extDeTipo(obj.tipo)}`;
+  if(!obj || !obj.data || !cloud.ready || !cloud.sb || !cloud.user) return null;
+  const ruta = `${cloud.user.id}/${carpeta}/${uid()}.${extDeTipo(obj.tipo)}`;
+  const subir = async () => {
     const blob = dataURLaBlob(obj.data);
     const { error } = await cloud.sb.storage.from(BUCKET_ADJ)
-      .upload(ruta, blob, { contentType: obj.tipo || 'application/octet-stream', upsert:false });
+      .upload(ruta, blob, { contentType: obj.tipo || 'application/octet-stream', upsert:true });
+    return error || null;
+  };
+  try{
+    let error = await subir();
+    if(error && esErrorDeSesion(error)){ const s = await cloud.renovarSesion(); if(s) error = await subir(); }
     if(error) throw error;
     return { name:obj.name||'', tipo:obj.tipo||'', path:ruta };
   }catch(e){ console.error(e); return null; }
@@ -966,9 +1005,13 @@ async function urlAdjunto(ref){
   if(!ref || !ref.path) return '';
   const c = _urlAdjCache.get(ref.path);
   if(c && c.expira > Date.now()) return c.url;
-  const ses = await cloud.sesionValida(); if(!ses) return '';
+  if(!cloud.ready || !cloud.sb) return '';
   try{
-    const { data, error } = await cloud.sb.storage.from(BUCKET_ADJ).createSignedUrl(ref.path, 3600);
+    let { data, error } = await cloud.sb.storage.from(BUCKET_ADJ).createSignedUrl(ref.path, 3600);
+    if(error && esErrorDeSesion(error)){
+      const s = await cloud.renovarSesion();
+      if(s) ({ data, error } = await cloud.sb.storage.from(BUCKET_ADJ).createSignedUrl(ref.path, 3600));
+    }
     if(error || !data) throw error || new Error('sin url');
     _urlAdjCache.set(ref.path, { url:data.signedUrl, expira: Date.now()+3300000 });
     return data.signedUrl;
