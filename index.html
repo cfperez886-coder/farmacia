@@ -225,7 +225,7 @@ const store = {
   // Normaliza cualquier juego de datos (local o traído de la nube): campos nuevos,
   // arrays garantizados y consecutivo de venta sin huecos ni duplicados.
   migrar(d){
-    d.config = Object.assign({ negocio:'Mi Negocio', alertaVencimiento:30, alertaStock:5, nextConsecutivo:1, anchoTicket:58, ticketCPL:32 }, d.config||{});
+    d.config = Object.assign({ negocio:'Mi Negocio', alertaVencimiento:30, alertaStock:5, nextConsecutivo:1, anchoTicket:58, ticketCPL:32, ticketEntrega:'' }, d.config||{});
     ['clientes','productos','compras','ventas','gastos','proveedores'].forEach(k=>{ if(!Array.isArray(d[k])) d[k]=[]; });
     d.productos.forEach(p=>(p.lotes||[]).forEach(l=>{ if(!l.id) l.id=uid(); })); // lotes viejos sin id (previos a la edición por lote)
     // Clientes y proveedores siempre con historial y saldo numerico (repara datos viejos)
@@ -2106,6 +2106,29 @@ function dataURLaBlob(durl){
   for(let i=0;i<bin.length;i++) u8[i] = bin.charCodeAt(i);
   return new Blob([u8], {type:mime});
 }
+/* Guarda la imagen directamente en el celular (carpeta Descargas / galería).
+   Es el camino más corto: Fun Print y las apps de estas mini impresoras NO se
+   registran en el menú de compartir, así que compartir solo añadía pasos
+   (compartir -> guardar -> abrir Fotos -> descargar). Desde Descargas la imagen
+   ya aparece en la galería y en el selector de la app de la impresora. */
+function guardarImagenEnCelular(durl, archivo){
+  try{
+    const url = URL.createObjectURL(dataURLaBlob(durl));
+    const a = document.createElement('a');
+    a.href = url; a.download = archivo; a.rel = 'noopener';
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(()=>{ try{ a.remove(); URL.revokeObjectURL(url); }catch(e){} }, 120000);
+    return true;
+  }catch(e){ console.error(e); return false; }
+}
+/* ¿Cómo entregar el ticket? 'guardar' = descarga directa (default en celular),
+   'compartir' = menú del sistema (útil si tu app SÍ aparece ahí). */
+const modoTicket = () => (DB.config.ticketEntrega === 'compartir' || DB.config.ticketEntrega === 'guardar')
+  ? DB.config.ticketEntrega
+  : (esCelular() ? 'guardar' : 'compartir');
+
 /* Entrega el ticket como imagen.
    En celular abre el menú de COMPARTIR del sistema: desde ahí se manda directo a la app
    de la impresora (Fun Print) o se guarda en Fotos. En iPhone la descarga automática de
@@ -2115,6 +2138,13 @@ function ticketImagen(texto, nombre){
   const durl = cv.toDataURL('image/png');
   const archivo = (nombre||'ticket')+'.png';
   ticketParaCompartir = { durl, archivo };   // por si hay que reintentar el compartir
+  // Camino corto: se guarda de una vez en el celular y se avisa dónde quedó.
+  if(modoTicket() === 'guardar' && guardarImagenEnCelular(durl, archivo)){
+    toast(esAndroid()
+      ? 'Ticket guardado. Ábrelo en Fun Print → Imagen/Álbum → Descargas'
+      : 'Ticket guardado en tus descargas. Ábrelo desde la app de la impresora');
+    return;
+  }
   try{
     const file = new File([dataURLaBlob(durl)], archivo, {type:'image/png'});
     if(navigator.canShare && navigator.canShare({files:[file]})){
@@ -2145,7 +2175,7 @@ function verTicketImagen(durl, archivo){
      </div>
      <p class="text-xs text-slate-400 mb-2 text-center">${guardar}</p>
      <div class="flex gap-2">
-       <a href="${href}" download="${esc(archivo)}" class="flex-1 text-center bg-brand hover:bg-brand-700 text-white font-semibold py-2.5 rounded-xl">⬇️ Descargar</a>
+       <a href="${href}" download="${esc(archivo)}" class="flex-1 text-center bg-brand hover:bg-brand-700 text-white font-semibold py-2.5 rounded-xl">⬇️ Guardar en el celular</a>
        <button type="button" onclick="compartirTicketDeNuevo()" class="flex-1 border border-slate-200 hover:bg-slate-50 py-2.5 rounded-xl text-sm">📤 Compartir</button>
      </div>`);
 }
@@ -2169,12 +2199,13 @@ function compartirTicketDeNuevo(){
    - iPhone: Fun Print NO registra extensión de compartir, toca guardar en Fotos. */
 function pasosImpresion(){
   const mm = ticketMedidas().mm;
-  const pasos = esAndroid()
-    ? [`Toca <b>Compartir</b> y elige <b>Fun Print</b> en la lista de apps.`,
-       `Si no la ves, toca <b>Guardar imagen</b> (o “Descargar”) y ábrela luego desde Fun Print.`,
-       `En Fun Print, conecta la impresora por <b>Bluetooth</b> y elige la imagen.`,
+  const guardaDirecto = modoTicket() === 'guardar';
+  const pasos = guardaDirecto
+    ? [`El ticket <b>ya quedó guardado</b> en tu celular (carpeta <b>Descargas</b>).`,
+       `Abre <b>Fun Print</b> y conecta la impresora por <b>Bluetooth</b>.`,
+       `Elige <b>Imagen / Foto / Álbum</b> y busca el ticket en <b>Descargas</b>.`,
        `Imprime. Si la app ofrece tamaño, usa el ancho completo del papel.`]
-    : [`Guarda esta imagen en <b>Fotos</b>.`,
+    : [`Guarda esta imagen en <b>Fotos</b> (o Descargas).`,
        `Abre la app de la impresora (<b>Fun Print</b>) y conéctala por Bluetooth.`,
        `Elige <b>Imagen / Foto / Álbum</b> y selecciona el ticket.`,
        `Imprime. Si la app ofrece tamaño, usa el ancho completo del papel.`];
@@ -2825,6 +2856,11 @@ function openConfig(){
        ${field('Ancho del rollo',`<select id="cfgTicket" class="${inputCls}"><option value="58"${(+DB.config.anchoTicket===80)?'':' selected'}>58 mm (mini térmica)</option><option value="80"${(+DB.config.anchoTicket===80)?' selected':''}>80 mm (mostrador)</option></select>`)}
        ${field('Letra del ticket',`<select id="cfgCPL" class="${inputCls}">${CPL_OPCIONES.map(o=>`<option value="${o.v}"${ticketCPL()===o.v?' selected':''}>${o.t} (${o.v} caracteres)</option>`).join('')}</select>`)}
      </div>
+     ${field('Al tocar “🖼️ Imagen”',`<select id="cfgEntrega" class="${inputCls}">
+        <option value="guardar"${modoTicket()==='guardar'?' selected':''}>Guardar en el celular (recomendado)</option>
+        <option value="compartir"${modoTicket()==='compartir'?' selected':''}>Abrir el menú de compartir</option>
+      </select>`)}
+     <p class="text-[11px] text-slate-400 -mt-2 mb-3">Guardar es más rápido: la mayoría de apps de mini impresora no aparecen en el menú de compartir.</p>
      <button onclick="saveConfig()" class="w-full bg-brand text-white font-semibold py-2.5 rounded-xl mb-4">Guardar ajustes</button>
      <div class="border-t border-slate-100 pt-4 mb-4">
        <p class="text-xs text-slate-400 mb-2">Adjuntos y fotos</p>
@@ -2858,6 +2894,7 @@ function saveConfig(){
   DB.config.alertaStock=+$('#cfgStock').value||5;
   DB.config.anchoTicket=(+$('#cfgTicket')?.value===80)?80:58;
   DB.config.ticketCPL=+$('#cfgCPL')?.value||32;
+  DB.config.ticketEntrega = ($('#cfgEntrega')?.value==='compartir') ? 'compartir' : 'guardar';
   store.save(); closeModal(); render(); toast('Ajustes guardados');
 }
 function exportData(){
