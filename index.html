@@ -263,7 +263,13 @@ const store = {
     if(!this.data) this.data = { clientes:[], productos:[], compras:[], ventas:[], gastos:[], config:{ negocio:'Mi Negocio', alertaVencimiento:30, alertaStock:5, nextConsecutivo:1 } };
     return this.migrar(this.data);
   },
-  save(){ localStorage.setItem(this.key, JSON.stringify(this.data)); if(cloud.ready && cloud.user && !cloud.applying) cloud.push(); },
+  save(){
+    // Si el dispositivo se queda sin espacio (iOS limita a ~5 MB) setItem lanza excepción:
+    // se avisa, pero NO se corta la operación en curso ni se pierde la subida a la nube.
+    try{ localStorage.setItem(this.key, JSON.stringify(this.data)); }
+    catch(e){ console.error(e); toast('No se pudo guardar en este dispositivo (memoria llena). Exporta un respaldo desde Ajustes.','err'); }
+    if(cloud.ready && cloud.user && !cloud.applying) cloud.push();
+  },
 };
 const DB = store.load();
 
@@ -277,6 +283,7 @@ const SUPABASE_KEY = 'sb_publishable_pneTY66uk2k4WSktBAh5rQ_xg5tiklz';
 
 const cloud = {
   sb:null, user:null, ready:false, status:'off', lastSync:null, chan:null, pushTimer:null, applying:false,
+  pendiente:false, reintento:0, reintentoTimer:null, ultimoError:'',
   init(){
     if(!window.supabase || !SUPABASE_URL){ this.status='nolib'; updateCloudBadges(); return; }
     try{ this.sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY); }
@@ -306,6 +313,24 @@ const cloud = {
     return 'ok';
   },
   async signOut(){ if(this.sb) await this.sb.auth.signOut(); },
+  /* Asegura un token vigente ANTES de tocar la nube.
+     El token de acceso dura 1 hora; si la app estuvo minimizada o se cayó la señal,
+     la renovación puede no haber ocurrido y la petición sale SIN sesión: entonces
+     Postgres la rechaza con "new row violates row-level security policy" (error 401).
+     Esa era la causa del "Error de sync". */
+  async sesionValida(){
+    try{
+      const { data } = await this.sb.auth.getSession();
+      let s = data && data.session;
+      const vencido = s && s.expires_at && (s.expires_at*1000 < Date.now()+60000); // 1 min de margen
+      if(!s || vencido){
+        const r = await this.sb.auth.refreshSession();
+        s = (r && r.data && r.data.session) || null;
+      }
+      if(s && s.user) this.user = s.user;
+      return s;
+    }catch(e){ console.error(e); return null; }
+  },
   async afterLogin(){
     this.status = 'sync'; updateCloudBadges();
     try{
@@ -319,8 +344,9 @@ const cloud = {
       } else {
         await this.push(true); // nube vacía: sube lo local
       }
-      this.status = 'ok'; this.lastSync = new Date();
+      this.status = 'ok'; this.lastSync = new Date(); this.ultimoError='';
       this.subscribe();
+      if(this.pendiente) this.doPush();   // cambios que no se pudieron subir antes
       updateCloudBadges(); if(cuentaAbierta()) openCuenta();
       toast('Sincronizado con la nube ✓');
     }catch(e){ console.error(e); this.status='error'; updateCloudBadges(); if(cuentaAbierta()) openCuenta(); toast('Error al sincronizar','err'); }
@@ -336,28 +362,54 @@ const cloud = {
   },
   push(now=false){
     if(!this.user || this.applying) return;
+    this.pendiente = true;                 // hay cambios locales sin subir
     clearTimeout(this.pushTimer);
-    const doPush = async ()=>{
-      try{
-        this.status='sync'; updateCloudBadges();
-        const { error } = await this.sb.from('negocio_datos').upsert({ user_id:this.user.id, data:DB, updated_at:new Date().toISOString() });
-        if(error) throw error;
-        this.status='ok'; this.lastSync=new Date(); updateCloudBadges();
-      }catch(e){ console.error(e); this.status='error'; updateCloudBadges(); }
-    };
-    if(now) return doPush();
-    this.pushTimer = setTimeout(doPush, 1200);
+    if(now) return this.doPush();
+    this.pushTimer = setTimeout(()=>this.doPush(), 1200);
   },
+  async doPush(){
+    if(!this.user || this.applying) return;
+    this.pendiente = true;   // si estamos subiendo es porque hay algo que subir: así el reintento
+                             // funciona aunque doPush se llame desde 'online', 'visible' o el login
+    clearTimeout(this.reintentoTimer); this.reintentoTimer=null;
+    try{
+      this.status='sync'; updateCloudBadges();
+      const ses = await this.sesionValida();
+      if(!ses) throw new Error('sesion-vencida');
+      const { error } = await this.sb.from('negocio_datos').upsert({ user_id:this.user.id, data:DB, updated_at:new Date().toISOString() });
+      if(error) throw error;
+      this.pendiente=false; this.reintento=0; this.ultimoError='';
+      this.status='ok'; this.lastSync=new Date(); updateCloudBadges(); if(cuentaAbierta()) openCuenta();
+    }catch(e){
+      console.error(e);
+      this.ultimoError = mensajeSync(e);
+      this.status='error'; updateCloudBadges(); if(cuentaAbierta()) openCuenta();
+      this.programarReintento();
+    }
+  },
+  // Reintenta solo, esperando cada vez un poco más (3s, 6s, 12s… hasta 1 minuto).
+  programarReintento(){
+    if(!this.pendiente || !this.user) return;
+    clearTimeout(this.reintentoTimer);
+    const espera = Math.min(60000, 3000 * Math.pow(2, this.reintento++));
+    this.reintentoTimer = setTimeout(()=>this.doPush(), espera);
+  },
+  // Botón "Reintentar ahora" de la ventana de Cuenta
+  reintentarYa(){ this.reintento=0; this.pendiente=true; this.doPush(); },
   async pull(silencioso=false){
     if(!this.user) return;
     this.status='sync'; updateCloudBadges();
     try{
+      const ses = await this.sesionValida();
+      if(!ses) throw new Error('sesion-vencida');
       const { data, error } = await this.sb.from('negocio_datos').select('data').eq('user_id', this.user.id).maybeSingle();
       if(error) throw error;
       if(data && data.data && JSON.stringify(data.data)!==JSON.stringify(DB)) this.applyRemote(data.data);
+      this.ultimoError='';
       this.status='ok'; this.lastSync=new Date(); updateCloudBadges(); if(cuentaAbierta()) openCuenta();
       if(!silencioso) toast('Datos actualizados desde la nube');
-    }catch(e){ console.error(e); this.status='error'; updateCloudBadges(); if(!silencioso) toast('No se pudo actualizar','err'); }
+      if(this.pendiente) this.doPush();   // si algo quedó sin subir, aprovecha que hay conexión
+    }catch(e){ console.error(e); this.ultimoError=mensajeSync(e); this.status='error'; updateCloudBadges(); if(cuentaAbierta()) openCuenta(); if(!silencioso) toast(this.ultimoError,'err'); }
   },
   subscribe(){
     this.unsubscribe();
@@ -388,6 +440,19 @@ function updateCloudBadges(){
   const info = cloudStatusInfo();
   document.querySelectorAll('.cloudBadgeInner').forEach(el=>{ el.textContent = info.icon+' '+info.text; el.style.color = info.hex; });
 }
+/* Traduce el fallo de sincronización a algo que el usuario pueda entender y accionar. */
+function mensajeSync(err){
+  const m = ((err && (err.message || err.code)) || '').toString().toLowerCase();
+  if(m.includes('sesion-vencida') || m.includes('jwt') || m.includes('42501') || m.includes('row-level') || m.includes('row level'))
+    return 'Tu sesión se venció. Cierra sesión y vuelve a entrar para subir los cambios.';
+  if(!navigator.onLine || m.includes('failed to fetch') || m.includes('networkerror') || m.includes('network request'))
+    return 'Sin conexión. Tus datos están guardados en este dispositivo y se subirán solos.';
+  if(m.includes('too large') || m.includes('payload') || m.includes('413'))
+    return 'Los datos pesan demasiado para subirlos. Quita fotos o adjuntos antiguos.';
+  if(m.includes('timeout') || m.includes('timed out'))
+    return 'La subida tardó demasiado. Se reintentará sola.';
+  return (err && err.message) ? ('No se pudo sincronizar: ' + err.message) : 'No se pudo sincronizar.';
+}
 function traducirError(err){
   const m = ((err && err.message) || '').toLowerCase();
   if(m.includes('invalid login')) return 'Correo o contraseña incorrectos.';
@@ -410,6 +475,12 @@ function openCuenta(){
         <div class="font-semibold break-all">${esc(cloud.user.email||'')}</div>
         <div class="text-sm mt-1" style="color:${info.hex}">${info.icon} ${info.text}${cloud.lastSync?` · ${cloud.lastSync.toLocaleTimeString('es-CO')}`:''}</div>
       </div>
+      ${cloud.status==='error' ? `<div class="bg-rose-50 border border-rose-200 rounded-xl p-3 mb-3">
+        <div class="text-sm font-semibold text-rose-700 mb-1">No se pudo sincronizar</div>
+        <div class="text-xs text-rose-700 mb-2">${esc(cloud.ultimoError||'Error desconocido.')}</div>
+        <div class="text-[11px] text-rose-600 mb-2">Tranquilo: nada se ha perdido — todo está guardado en este dispositivo.</div>
+        <button onclick="cloud.reintentarYa()" class="w-full bg-rose-600 hover:bg-rose-700 text-white font-semibold py-2 rounded-lg text-sm">🔄 Reintentar ahora</button>
+      </div>` : (cloud.pendiente ? `<div class="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl p-3 mb-3">Hay cambios sin subir; se están enviando.</div>` : '')}
       <button onclick="cloudLogout()" class="w-full border border-rose-200 text-rose-600 rounded-xl py-2.5 text-sm hover:bg-rose-50">Cerrar sesión</button>
       <p class="text-[11px] text-slate-400 mt-3">La sincronización es automática: cada cambio se sube solo a la nube y los cambios hechos en otros dispositivos llegan solos a este.</p>`;
   } else {
@@ -2504,8 +2575,17 @@ if('serviceWorker' in navigator && location.protocol==='https:'){ navigator.serv
 // - al ocultar/minimizar la app: sube de inmediato cualquier guardado pendiente
 // - al volver a la app: trae en silencio lo último de la nube (por si el tiempo real se perdió)
 document.addEventListener('visibilitychange', ()=>{
-  if(document.visibilityState==='hidden' && cloud.user && cloud.pushTimer){ clearTimeout(cloud.pushTimer); cloud.pushTimer=null; cloud.push(true); }
-  if(document.visibilityState==='visible' && cloud.user && cloud.status!=='sync'){ cloud.pull(true); }
+  if(document.visibilityState==='hidden' && cloud.user && cloud.pendiente){ clearTimeout(cloud.pushTimer); cloud.pushTimer=null; cloud.doPush(); }
+  if(document.visibilityState==='visible' && cloud.user && cloud.status!=='sync'){
+    if(cloud.pendiente) cloud.doPush();   // primero sube lo de este dispositivo
+    else cloud.pull(true);
+  }
+});
+// Al recuperar la conexión, subir de inmediato lo que quedó pendiente
+window.addEventListener('online', ()=>{
+  if(!cloud.user) return;
+  cloud.reintento = 0;
+  if(cloud.pendiente) cloud.doPush(); else cloud.pull(true);
 });
 </script>
 </body>
