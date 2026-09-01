@@ -630,6 +630,28 @@ function aplicarPago(x, monto, movId){
 }
 // Stock total de un producto = suma de sus lotes
 const stockDe = p => (p.lotes||[]).reduce((s,l)=>s+(+l.cantidad||0),0);
+/* Valor del inventario, en las dos monedas que importan:
+   - a COSTO: lo que tienes invertido en la mercancía que hay en bodega.
+   - a PRECIO DE VENTA: lo que entraría si se vendiera todo.
+   El costo se toma LOTE POR LOTE, porque cada compra pudo tener un costo distinto;
+   si un lote viejo no lo trae, se usa el precio de compra del producto. */
+function valorInventario(){
+  let costo = 0, venta = 0, unidades = 0, conStock = 0;
+  (DB.productos||[]).forEach(p=>{
+    const st = stockDe(p);
+    if(st > 0) conStock++;
+    (p.lotes||[]).forEach(l=>{
+      const c = +l.cantidad || 0; if(c <= 0) return;
+      unidades += c;
+      costo += c * (+l.costo || +p.precioCompra || 0);
+      venta += c * (+p.precioVenta || 0);
+    });
+  });
+  return { costo, venta, unidades, conStock,
+           productos: (DB.productos||[]).length,
+           ganancia: venta - costo,
+           margen: venta ? Math.round((venta - costo) / venta * 100) : 0 };
+}
 
 // Descontar cantidad de un producto por FIFO según vencimiento (los que vencen primero salen primero)
 // Devuelve cuanto se pudo descontar realmente (puede ser menos si no hay stock)
@@ -1152,7 +1174,7 @@ function viewDashboard(){
   const totalMes = DB.ventas.filter(v=>v.fecha.slice(0,7)===hoy.slice(0,7)).reduce((s,v)=>s+v.total,0);
   const gananciaMes = DB.ventas.filter(v=>v.fecha.slice(0,7)===hoy.slice(0,7)).reduce((s,v)=>s+(v.ganancia||0),0);
   const fiadoTotal = DB.clientes.reduce((s,c)=>s+(c.saldo||0),0);
-  const valorInv = DB.productos.reduce((s,p)=> s + stockDe(p)*(p.precioVenta||0), 0);
+  const inv = valorInventario();
   const bajoStock = DB.productos.filter(p=> stockDe(p) <= DB.config.alertaStock);
   const porVencer = [];
   DB.productos.forEach(p=>(p.lotes||[]).forEach(l=>{ const d=daysUntil(l.venc); if(l.venc && d!==null && d<=DB.config.alertaVencimiento) porVencer.push({p,l,d}); }));
@@ -1180,7 +1202,25 @@ function viewDashboard(){
         ${kpi('Ventas de hoy', fmtMoney(totalHoy), `${ventasHoy.length} venta(s)`,'text-teal-600')}
         ${kpi('Ventas del mes', fmtMoney(totalMes), `Ganancia: ${fmtMoney(gananciaMes)}`)}
         ${kpi('Por cobrar (crédito)', fmtMoney(fiadoTotal), `${DB.clientes.filter(c=>c.saldo>0).length} cliente(s)`,'text-amber-600')}
-        ${kpi('Valor inventario', fmtMoney(valorInv), `${DB.productos.length} producto(s)`)}
+        <div class="card p-4">
+          <div class="flex items-start justify-between gap-2">
+            <div class="text-xs text-slate-400 font-medium">Valor inventario</div>
+            <button onclick="go('inventario')" class="text-[10px] text-brand-700 font-medium shrink-0">Ver →</button>
+          </div>
+          <div class="mt-1.5 space-y-2">
+            <div>
+              <div class="text-[11px] text-slate-400 leading-none">A costo</div>
+              <div class="text-lg font-bold tabular-nums leading-tight">${fmtMoney(inv.costo)}</div>
+            </div>
+            <div>
+              <div class="text-[11px] text-slate-400 leading-none">A precio de venta</div>
+              <div class="text-lg font-bold text-teal-600 tabular-nums leading-tight">${fmtMoney(inv.venta)}</div>
+            </div>
+          </div>
+          <div class="text-[11px] text-slate-400 mt-1.5 pt-1.5 border-t border-slate-100">
+            ${fmtNum(inv.conStock)} con stock · ${fmtNum(inv.unidades)} u${inv.venta?` · margen ${inv.margen}%`:''}
+          </div>
+        </div>
       </div>
       <div class="grid md:grid-cols-2 gap-4">
         <div class="card p-4">
@@ -2924,8 +2964,9 @@ function exportInventarioExcel(){
       lotes.forEach(l=> detalle.push({ Producto:p.nombre, Categoría:p.categoria||'', Unidad:p.unidad||'u', Lote:l.lote||'', Cantidad:l.cantidad, Vencimiento:l.venc||'', 'Precio compra':p.precioCompra||0, 'Precio venta':p.precioVenta||0, 'Valor venta':l.cantidad*(p.precioVenta||0) }));
     }
   });
-  const valorVenta = ps.reduce((s,p)=>s+stockDe(p)*(p.precioVenta||0),0);
-  const valorCosto = ps.reduce((s,p)=>s+stockDe(p)*(p.precioCompra||0),0);
+  // Mismo cálculo que la tarjeta de Inicio, para que no se contradigan
+  const invTot = valorInventario();
+  const valorVenta = invTot.venta, valorCosto = invTot.costo;
   const unidadesTotales = ps.reduce((s,p)=>s+stockDe(p),0);
   const bajoStock = ps.filter(p=>stockDe(p)<=DB.config.alertaStock).length;
   let vencidos=0, porVencer=0;
@@ -2939,6 +2980,8 @@ function exportInventarioExcel(){
     ['Unidades totales en stock', unidadesTotales],
     ['Valor inventario (a precio de venta)', valorVenta],
     ['Valor inventario (a costo)', valorCosto],
+    ['Ganancia potencial (venta − costo)', valorVenta - valorCosto],
+    ['Margen', (valorVenta ? Math.round((valorVenta-valorCosto)/valorVenta*100) : 0) + '%'],
     ['Productos con stock bajo (≤'+DB.config.alertaStock+')', bajoStock],
     ['Lotes vencidos', vencidos],
     ['Lotes por vencer (≤'+DB.config.alertaVencimiento+' días)', porVencer],
