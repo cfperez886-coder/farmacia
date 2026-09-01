@@ -1378,13 +1378,94 @@ function viewVencimientos(){
 
 /* ---------- REPORTES ---------- */
 let repFiltro = { desde:'', hasta:'' };
+let repCliente = '';   // '' = todos · id de cliente · '__mostrador__' = ventas sin cliente
 function onRepFecha(which,val){ repFiltro[which]=val; renderView(); }
+function onRepCliente(val){ repCliente = val; renderView(); }
+function limpiarFiltrosRep(){ repFiltro={desde:'',hasta:''}; repCliente=''; renderView(); }
+
+/* ---------- Indicadores de clientes ----------
+   Se calculan sobre las ventas del periodo elegido. Ojo con la diferencia:
+   lo "del periodo" (compraron, nuevos, ticket) sale de las ventas filtradas,
+   pero la CARTERA es una foto de hoy (lo que deben ahora, sin importar el rango). */
+function kpisClientes(ventasPeriodo){
+  const conCliente = ventasPeriodo.filter(v=>v.clienteId);
+  const sinCliente = ventasPeriodo.filter(v=>!v.clienteId);
+
+  const ids = [...new Set(conCliente.map(v=>v.clienteId))];
+  // "Nuevo" = su primera compra de todas cayó dentro del periodo
+  const primeraCompra = {};
+  DB.ventas.forEach(v=>{
+    if(!v.clienteId) return;
+    if(!primeraCompra[v.clienteId] || v.fecha < primeraCompra[v.clienteId]) primeraCompra[v.clienteId] = v.fecha;
+  });
+  const fechasPeriodo = new Set(ventasPeriodo.map(v=>v.fecha));
+  const nuevos = ids.filter(id => fechasPeriodo.has(primeraCompra[id]));
+
+  const totalCon = conCliente.reduce((s,v)=>s+v.total,0);
+  const totalSin = sinCliente.reduce((s,v)=>s+v.total,0);
+  const aCredito = ventasPeriodo.filter(v=>v.fiado).reduce((s,v)=>s+v.total,0);
+  const totalTodo = totalCon + totalSin;
+
+  const cartera = (DB.clientes||[]).reduce((s,c)=>s+(+c.saldo||0),0);
+  const conDeuda = (DB.clientes||[]).filter(c=>(+c.saldo||0)>0);
+  // Deuda ya vencida (facturas con fecha límite pasada y saldo pendiente)
+  const hoy = todayISO();
+  let vencida = 0;
+  (DB.clientes||[]).forEach(c=>(c.movs||[]).forEach(m=>{
+    if(esCargo(m) && m.vence && m.vence < hoy) vencida += pendienteDe(m);
+  }));
+
+  // Top clientes por monto comprado en el periodo
+  const porCliente = {};
+  conCliente.forEach(v=>{
+    porCliente[v.clienteId] = porCliente[v.clienteId] || { total:0, n:0 };
+    porCliente[v.clienteId].total += v.total;
+    porCliente[v.clienteId].n++;
+  });
+  const top = Object.entries(porCliente)
+    .map(([id,x])=>({ c:getCliente(id), ...x }))
+    .filter(x=>x.c)
+    .sort((a,b)=>b.total-a.total).slice(0,6);
+
+  return {
+    compraron: ids.length, nuevos: nuevos.length,
+    ticket: conCliente.length ? Math.round(totalCon/conCliente.length) : 0,
+    ventasCon: conCliente.length, totalCon,
+    ventasSin: sinCliente.length, totalSin,
+    aCredito, pctCredito: totalTodo ? Math.round(aCredito/totalTodo*100) : 0,
+    cartera, conDeuda: conDeuda.length, vencida,
+    top, maxTop: Math.max(1, ...top.map(t=>t.total))
+  };
+}
+
+/* Resumen de UN cliente dentro del periodo (cuando se segmenta por cliente) */
+function resumenCliente(c, ventasPeriodo){
+  const total = ventasPeriodo.reduce((s,v)=>s+v.total,0);
+  const ganancia = ventasPeriodo.reduce((s,v)=>s+(v.ganancia||0),0);
+  const aCredito = ventasPeriodo.filter(v=>v.fiado).reduce((s,v)=>s+v.total,0);
+  const fechas = ventasPeriodo.map(v=>v.fecha).sort();
+  const todas = DB.ventas.filter(v=>v.clienteId===c.id).map(v=>v.fecha).sort();
+  return {
+    total, ganancia, aCredito,
+    n: ventasPeriodo.length,
+    ticket: ventasPeriodo.length ? Math.round(total/ventasPeriodo.length) : 0,
+    saldo: +c.saldo || 0,
+    ultima: fechas.length ? fechas[fechas.length-1] : '',
+    primera: todas.length ? todas[0] : '',
+    historico: DB.ventas.filter(v=>v.clienteId===c.id).reduce((s,v)=>s+v.total,0)
+  };
+}
 function viewReportes(){
   const hoy=todayISO(), mes=hoy.slice(0,7);
   const filtro = !!(repFiltro.desde||repFiltro.hasta);
   const enRango = f => (!repFiltro.desde||f>=repFiltro.desde) && (!repFiltro.hasta||f<=repFiltro.hasta);
   // Sin filtro de fechas: el mes actual. Con filtro: el rango elegido.
-  const ventasMes = filtro? DB.ventas.filter(v=>enRango(v.fecha)) : DB.ventas.filter(v=>v.fecha.slice(0,7)===mes);
+  const cliSel = repCliente && repCliente!=='__mostrador__' ? getCliente(repCliente) : null;
+  const porCliente = v => !repCliente
+    ? true
+    : (repCliente==='__mostrador__' ? !v.clienteId : v.clienteId===repCliente);
+  const ventasTodas = filtro? DB.ventas.filter(v=>enRango(v.fecha)) : DB.ventas.filter(v=>v.fecha.slice(0,7)===mes);
+  const ventasMes = ventasTodas.filter(porCliente);
   const totalMes = ventasMes.reduce((s,v)=>s+v.total,0);
   const gananciaMes = ventasMes.reduce((s,v)=>s+(v.ganancia||0),0);
   const comprasMes = (filtro? DB.compras.filter(c=>enRango(c.fecha)) : DB.compras.filter(c=>c.fecha.slice(0,7)===mes)).reduce((s,c)=>s+c.total,0);
@@ -1396,7 +1477,7 @@ function viewReportes(){
   const maxCant = Math.max(1,...top.map(t=>t.cant));
 
   // Ventas últimos 7 días
-  const dias=[]; for(let i=6;i>=0;i--){ const d=new Date(); d.setDate(d.getDate()-i); const iso=isoLocal(d); dias.push({iso,label:d.toLocaleDateString('es-CO',{weekday:'short'}),total:DB.ventas.filter(v=>v.fecha===iso).reduce((s,v)=>s+v.total,0)}); }
+  const dias=[]; for(let i=6;i>=0;i--){ const d=new Date(); d.setDate(d.getDate()-i); const iso=isoLocal(d); dias.push({iso,label:d.toLocaleDateString('es-CO',{weekday:'short'}),total:DB.ventas.filter(v=>v.fecha===iso && porCliente(v)).reduce((s,v)=>s+v.total,0)}); }
   const maxDia=Math.max(1,...dias.map(d=>d.total));
 
   const kpi=(icon,l,v,c)=>`<div class="card p-4 relative overflow-hidden"><span class="absolute -right-1 -top-1 text-4xl opacity-10 select-none">${icon}</span><div class="text-xs text-slate-400 font-medium">${l}</div><div class="text-xl font-bold mt-1 ${c||''}">${v}</div></div>`;
@@ -1407,7 +1488,13 @@ function viewReportes(){
     + `<div class="flex flex-wrap items-end gap-2 mb-4">
         <label class="text-xs text-slate-500">Desde<input type="date" value="${repFiltro.desde}" onchange="onRepFecha('desde',this.value)" class="${inputCls} mt-1"></label>
         <label class="text-xs text-slate-500">Hasta<input type="date" value="${repFiltro.hasta}" onchange="onRepFecha('hasta',this.value)" class="${inputCls} mt-1"></label>
-        ${filtro?`<button onclick="repFiltro={desde:'',hasta:''};renderView()" class="text-xs text-rose-500 border border-rose-200 rounded-lg px-3 py-2.5 h-fit">Limpiar fechas</button>`:''}
+        <label class="text-xs text-slate-500 min-w-[11rem] flex-1 sm:flex-none">Cliente
+          <select onchange="onRepCliente(this.value)" class="${inputCls} mt-1">
+            <option value="">Todos los clientes</option>
+            <option value="__mostrador__"${repCliente==='__mostrador__'?' selected':''}>Sin cliente (mostrador)</option>
+            ${clientesOrdenados().map(c=>`<option value="${c.id}"${repCliente===c.id?' selected':''}>${esc(c.nombre)}</option>`).join('')}
+          </select></label>
+        ${(filtro||repCliente)?`<button onclick="limpiarFiltrosRep()" class="text-xs text-rose-500 border border-rose-200 rounded-lg px-3 py-2.5 h-fit">Limpiar filtros</button>`:''}
       </div>
       <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
         ${kpi('💵',filtro?'Ventas del periodo':'Ventas del mes',fmtMoney(totalMes),'text-teal-600')}
@@ -1415,9 +1502,10 @@ function viewReportes(){
         ${kpi('🛒',filtro?'Compras del periodo':'Compras del mes',fmtMoney(comprasMes),'text-slate-700')}
         ${kpi('💸',filtro?'Gastos del periodo':'Gastos del mes',fmtMoney(gastosMes),'text-rose-600')}
       </div>
+      ${bloqueClientes(ventasMes, ventasTodas, cliSel, filtro)}
       <div class="grid md:grid-cols-2 gap-4">
         <div class="card p-4">
-          <h3 class="font-semibold mb-4">Ventas últimos 7 días</h3>
+          <h3 class="font-semibold mb-4">Ventas últimos 7 días${cliSel?` — ${esc(cliSel.nombre)}`:''}</h3>
           <div class="flex items-end gap-2 h-40">${dias.map(d=>`
             <div class="flex-1 flex flex-col items-center gap-1">
               <div class="text-[10px] text-slate-400">${d.total?fmtNum(Math.round(d.total/1000))+'k':''}</div>
@@ -1426,14 +1514,96 @@ function viewReportes(){
             </div>`).join('')}</div>
         </div>
         <div class="card p-4">
-          <h3 class="font-semibold mb-3">Más vendidos ${filtro?'(periodo)':'(mes)'}</h3>
+          <h3 class="font-semibold mb-3">Más vendidos ${cliSel?`— ${esc(cliSel.nombre)}`:(filtro?'(periodo)':'(mes)')}</h3>
           ${top.length? `<div class="space-y-2.5">${top.map(t=>`
             <div>
               <div class="flex justify-between text-sm mb-1"><span class="truncate">${esc(t.p.nombre)}</span><span class="text-slate-400 shrink-0 ml-2">${t.cant}u · ${fmtMoney(t.total)}</span></div>
               <div class="h-2 bg-slate-100 rounded-full overflow-hidden"><div class="h-full bg-teal-500 rounded-full" style="width:${t.cant/maxCant*100}%"></div></div>
-            </div>`).join('')}</div>` : `<p class="text-sm text-slate-400 py-6 text-center">Sin ventas este mes.</p>`}
+            </div>`).join('')}</div>` : `<p class="text-sm text-slate-400 py-6 text-center">${cliSel?'Este cliente no compró en el periodo.':'Sin ventas este mes.'}</p>`}
         </div>
       </div>`;
+}
+
+/* Clientes ordenados alfabéticamente para los selectores */
+const clientesOrdenados = () => (DB.clientes||[]).slice().sort((a,b)=>(a.nombre||'').localeCompare(b.nombre||''));
+
+/* Bloque de indicadores de clientes en Reportes.
+   Si hay un cliente seleccionado muestra SU ficha; si no, el panorama general. */
+function bloqueClientes(ventasPeriodo, ventasTodas, cliSel, filtro){
+  const mini = (l,v,c,sub) => `<div class="card p-3">
+      <div class="text-[11px] text-slate-400 font-medium">${l}</div>
+      <div class="text-lg font-bold mt-0.5 ${c||''}">${v}</div>
+      ${sub?`<div class="text-[11px] text-slate-400 mt-0.5">${sub}</div>`:''}
+    </div>`;
+
+  if(cliSel){
+    const r = resumenCliente(cliSel, ventasPeriodo);
+    return `<div class="card p-4 mb-5">
+      <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3">
+        <div>
+          <h3 class="font-semibold">👤 ${esc(cliSel.nombre)}</h3>
+          <p class="text-xs text-slate-400">${cliSel.negocio?esc(cliSel.negocio)+' · ':''}${cliSel.telefono?esc(cliSel.telefono):'sin teléfono'}${r.primera?` · cliente desde ${fmtDate(r.primera)}`:''}</p>
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <button onclick="openEstadoCuenta('${cliSel.id}')" class="text-xs border border-slate-200 rounded-lg px-3 py-2 hover:bg-slate-50">📄 Estado de cuenta</button>
+          ${cliSel.telefono?`<button onclick="cobrarWA('${cliSel.id}')" class="text-xs bg-teal-600 text-white rounded-lg px-3 py-2">📲 Cobrar</button>`:''}
+        </div>
+      </div>
+      <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        ${mini(filtro?'Compró en el periodo':'Compró este mes', fmtMoney(r.total),'text-teal-600', `${r.n} compra(s)`)}
+        ${mini('Ticket promedio', fmtMoney(r.ticket),'text-brand-700')}
+        ${mini('A crédito en el periodo', fmtMoney(r.aCredito), r.aCredito?'text-amber-600':'')}
+        ${mini('Debe hoy', fmtMoney(r.saldo), r.saldo?'text-rose-600':'text-teal-600', r.ultima?`última compra ${fmtDate(r.ultima)}`:'sin compras en el periodo')}
+      </div>
+      <p class="text-[11px] text-slate-400 mt-3">Histórico total con este cliente: <b>${fmtMoney(r.historico)}</b>. Los indicadores y las gráficas de abajo también están filtrados por él.</p>
+    </div>`;
+  }
+
+  const k = kpisClientes(ventasTodas);
+  return `<div class="mb-5">
+    <div class="flex items-center justify-between mb-2">
+      <h3 class="font-semibold text-sm">👥 Clientes ${filtro?'(periodo)':'(mes)'}</h3>
+      <button onclick="go('clientes')" class="text-xs text-brand-700">Ver todos →</button>
+    </div>
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-3">
+      ${mini('Clientes que compraron', fmtNum(k.compraron),'text-brand-700', `${k.ventasCon} venta(s) con cliente`)}
+      ${mini('Clientes nuevos', fmtNum(k.nuevos), k.nuevos?'text-teal-600':'', 'primera compra en el periodo')}
+      ${mini('Ticket promedio', fmtMoney(k.ticket),'', 'por venta con cliente')}
+      ${mini('Ventas de mostrador', fmtMoney(k.totalSin),'', `${k.ventasSin} venta(s) sin cliente`)}
+    </div>
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      ${mini('Por cobrar (hoy)', fmtMoney(k.cartera), k.cartera?'text-rose-600':'text-teal-600', `${k.conDeuda} cliente(s) con deuda`)}
+      ${mini('Deuda vencida', fmtMoney(k.vencida), k.vencida?'text-rose-600':'text-teal-600', 'pasó la fecha límite')}
+      ${mini('Vendido a crédito', fmtMoney(k.aCredito), k.aCredito?'text-amber-600':'', `${k.pctCredito}% de las ventas`)}
+      ${mini('Recuperado (abonos)', fmtMoney(abonosDelPeriodo(filtro)),'text-teal-600', 'lo que te pagaron')}
+    </div>
+    ${k.top.length?`<div class="card p-4 mt-3">
+      <h3 class="font-semibold mb-3 text-sm">Top clientes ${filtro?'(periodo)':'(mes)'}</h3>
+      <div class="space-y-2.5">${k.top.map(t=>`
+        <div>
+          <div class="flex justify-between text-sm mb-1">
+            <button onclick="onRepCliente('${t.c.id}')" class="truncate text-left hover:text-brand-700 hover:underline">${esc(t.c.nombre)}</button>
+            <span class="text-slate-400 shrink-0 ml-2">${t.n} compra(s) · ${fmtMoney(t.total)}</span>
+          </div>
+          <div class="h-2 bg-slate-100 rounded-full overflow-hidden"><div class="h-full bg-brand rounded-full" style="width:${t.total/k.maxTop*100}%"></div></div>
+        </div>`).join('')}</div>
+      <p class="text-[11px] text-slate-400 mt-3">Toca un cliente para ver solo sus datos.</p>
+    </div>`:''}
+  </div>`;
+}
+/* Abonos que recibiste de clientes en el periodo del reporte */
+function abonosDelPeriodo(filtro){
+  const hoy=todayISO(), mes=hoy.slice(0,7);
+  const enRango = f => (!repFiltro.desde||f>=repFiltro.desde) && (!repFiltro.hasta||f<=repFiltro.hasta);
+  let total = 0;
+  (DB.clientes||[]).forEach(c=>{
+    if(repCliente && repCliente!=='__mostrador__' && c.id!==repCliente) return;
+    (c.movs||[]).forEach(m=>{
+      if(m.tipo!=='abono') return;
+      if(filtro ? enRango(m.fecha) : (m.fecha||'').slice(0,7)===mes) total += (+m.monto||0);
+    });
+  });
+  return total;
 }
 
 /* ============================================================
