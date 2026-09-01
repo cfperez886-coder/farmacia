@@ -75,6 +75,11 @@
   html.dark .hover\:bg-emerald-50:hover{ background-color:rgba(16,185,129,.2) !important }
   html.dark .bg-rose-50{ background-color:rgba(244,63,94,.15) !important }
   html.dark .hover\:bg-rose-50:hover{ background-color:rgba(244,63,94,.22) !important }
+  /* Pantalla de bloqueo: siempre clara sobre el fondo azul, tambien en tema oscuro
+     (las reglas de arriba pintan de oscuro cualquier input y .bg-white) */
+  #candado input{ background-color:#fff !important; color:#0f172a !important; border-color:#fff !important }
+  #candado input::placeholder{ color:#94a3b8 !important }
+  #candado button[type=submit]{ background-color:#fff !important; color:#1d4ed8 !important }
 </style>
 
 <body class="bg-slate-50 text-slate-800 antialiased">
@@ -2849,6 +2854,70 @@ function openCierre(desde,hasta){
 function printCierre(desde,hasta){ printTicket(cierreTexto(desde,hasta)); }
 function imagenCierre(desde,hasta){ ticketImagen(cierreTexto(desde,hasta), 'cierre-'+(desde||todayISO())); }
 
+/* ---------- Clave de acceso ---------- */
+const MINUTOS_BLOQUEO = [
+  {v:1,t:'1 minuto'},{v:5,t:'5 minutos'},{v:10,t:'10 minutos'},
+  {v:15,t:'15 minutos'},{v:30,t:'30 minutos'},{v:0,t:'Nunca (solo al abrir)'}
+];
+function openSeguridad(){
+  const activa = seguridad.activa();
+  openModal('🔒 Clave de acceso', `
+    <p class="text-sm text-slate-500 mb-3">Evita que alguien que tome tu celular vea tus ventas, costos y las deudas de tus clientes.</p>
+    <form onsubmit="return guardarClave(event)">
+      ${activa?field('Clave actual *',`<input name="actual" type="password" inputmode="numeric" required autocomplete="current-password" class="${inputCls}" placeholder="••••">`):''}
+      ${field(activa?'Clave nueva (deja vacío para no cambiarla)':'Clave nueva *',`<input name="nueva" type="password" inputmode="numeric" ${activa?'':'required'} minlength="4" autocomplete="new-password" class="${inputCls}" placeholder="mínimo 4 caracteres">`)}
+      ${field('Bloquear tras estar sin usarla',`<select name="minutos" class="${inputCls}">${MINUTOS_BLOQUEO.map(o=>`<option value="${o.v}"${seguridad.minutos()===o.v?' selected':''}>${o.t}</option>`).join('')}</select>`)}
+      <div id="segMsg" class="text-xs text-rose-600 min-h-[16px] mb-2"></div>
+      <button type="submit" class="w-full bg-brand hover:bg-brand-700 text-white font-semibold py-2.5 rounded-xl">${activa?'Guardar cambios':'Activar la clave'}</button>
+      ${activa?`<button type="button" onclick="quitarClave()" class="w-full border border-rose-200 text-rose-600 rounded-xl py-2.5 text-sm mt-2">Quitar la clave</button>`:''}
+    </form>
+    <div class="bg-amber-50 border border-amber-200 rounded-xl p-3 mt-4 text-[11px] text-amber-900 leading-relaxed">
+      <b>Ten en cuenta:</b> la clave se guarda solo en este dispositivo y <b>no se puede recuperar</b> si la olvidas.
+      Es una pantalla de privacidad: <b>no cifra</b> los datos. Lo que de verdad protege tu información en todos lados
+      es la clave de tu cuenta de la nube — usa una fuerte y distinta a esta.
+    </div>`);
+}
+async function guardarClave(e){
+  e.preventDefault();
+  const f = e.target, msg = document.getElementById('segMsg');
+  const decir = t => { if(msg) msg.textContent = t; };
+  if(seguridad.activa()){
+    if(!(await seguridad.verificar(f.actual.value))) return decir('La clave actual no es correcta'), false;
+  }
+  const nueva = f.nueva.value;
+  const minutos = +f.minutos.value;
+  if(!seguridad.activa() && nueva.length < 4) return decir('Usa al menos 4 caracteres'), false;
+  if(nueva){
+    if(nueva.length < 4) return decir('Usa al menos 4 caracteres'), false;
+    await seguridad.fijar(nueva, minutos);
+  } else {
+    seguridad.guardarMinutos(minutos);
+  }
+  seguridad.reiniciarConteo();
+  closeModal(); render();
+  toast('Clave guardada ✔');
+  return false;
+}
+function quitarClave(){
+  openModal('Quitar la clave', `
+    <p class="text-sm text-slate-500 mb-3">Escribe tu clave actual para quitar el bloqueo de este dispositivo.</p>
+    <form onsubmit="return confirmarQuitarClave(event)">
+      ${field('Clave actual *',`<input name="actual" type="password" inputmode="numeric" required autocomplete="current-password" class="${inputCls}">`)}
+      <div id="segMsg2" class="text-xs text-rose-600 min-h-[16px] mb-2"></div>
+      <button type="submit" class="w-full bg-rose-600 hover:bg-rose-700 text-white font-semibold py-2.5 rounded-xl">Quitar la clave</button>
+    </form>`);
+  return false;
+}
+async function confirmarQuitarClave(e){
+  e.preventDefault();
+  const msg = document.getElementById('segMsg2');
+  if(!(await seguridad.verificar(e.target.actual.value))){ if(msg) msg.textContent='La clave no es correcta'; return false; }
+  seguridad.quitar();
+  closeModal(); render();
+  toast('Clave quitada');
+  return false;
+}
+
 /* ---------- Aligerar datos ----------
    Muestra cuánto pesan los adjuntos y las fotos, y deja moverlos/optimizarlos. */
 const kb = n => (n/1024) >= 1024 ? (n/1048576).toFixed(2)+' MB' : Math.round(n/1024)+' KB';
@@ -3337,6 +3406,11 @@ function openConfig(){
      <p class="text-[11px] text-slate-400 -mt-2 mb-3">Guardar es más rápido: la mayoría de apps de mini impresora no aparecen en el menú de compartir.</p>
      <button onclick="saveConfig()" class="w-full bg-brand text-white font-semibold py-2.5 rounded-xl mb-4">Guardar ajustes</button>
      <div class="border-t border-slate-100 pt-4 mb-4">
+       <p class="text-xs text-slate-400 mb-2">Seguridad</p>
+       <button onclick="openSeguridad()" class="w-full border border-slate-200 rounded-xl py-2.5 text-sm hover:bg-slate-50">${seguridad.activa()?'🔒 Clave de acceso · activada':'🔓 Poner una clave de acceso'}</button>
+       ${seguridad.activa()?`<button onclick="seguridad.bloquear()" class="w-full border border-slate-200 rounded-xl py-2.5 text-sm hover:bg-slate-50 mt-2">Bloquear ahora</button>`:''}
+     </div>
+     <div class="border-t border-slate-100 pt-4 mb-4">
        <p class="text-xs text-slate-400 mb-2">Adjuntos y fotos</p>
        <button onclick="openAdjuntos()" class="w-full border border-slate-200 rounded-xl py-2.5 text-sm hover:bg-slate-50">📦 Aligerar datos (adjuntos y fotos)</button>
      </div>
@@ -3384,10 +3458,146 @@ function importData(){
 }
 function resetData(){ if(!confirm('Esto borrará TODOS los datos. ¿Continuar?'))return; localStorage.removeItem(store.key); location.reload(); }
 
+/* ============================================================
+   CLAVE DE ACCESO Y BLOQUEO POR INACTIVIDAD
+   Para qué sirve: que nadie que tome el celular en el mostrador vea tus ventas,
+   costos, márgenes ni las deudas de tus clientes.
+   Qué NO hace: no cifra los datos. Alguien con conocimientos técnicos y el
+   dispositivo en la mano podría leerlos igual. La protección de fondo sigue
+   siendo la clave de tu cuenta de la nube y el bloqueo del propio celular.
+   La clave se guarda SOLO en este dispositivo (nunca viaja a la nube) y se
+   guarda derivada con PBKDF2, no en texto plano.
+   ============================================================ */
+const LLAVE_ACCESO = 'miNegocio_acceso';
+const seguridad = {
+  cfg: null,
+  bloqueada: false,
+  timer: null,
+
+  leer(){
+    if(this.cfg) return this.cfg;
+    try{ this.cfg = JSON.parse(localStorage.getItem(LLAVE_ACCESO)) || null; }catch(e){ this.cfg = null; }
+    return this.cfg;
+  },
+  activa(){ const c = this.leer(); return !!(c && c.hash && c.salt); },
+  minutos(){ const c = this.leer(); return c && typeof c.minutos==='number' ? c.minutos : 10; },
+
+  /* PBKDF2: derivar es lento a propósito, así una clave corta no se adivina rápido */
+  async derivar(clave, saltB64){
+    const enc = new TextEncoder();
+    const salt = Uint8Array.from(atob(saltB64), c=>c.charCodeAt(0));
+    const base = await crypto.subtle.importKey('raw', enc.encode(clave), 'PBKDF2', false, ['deriveBits']);
+    const bits = await crypto.subtle.deriveBits({ name:'PBKDF2', salt, iterations:150000, hash:'SHA-256' }, base, 256);
+    return btoa(String.fromCharCode(...new Uint8Array(bits)));
+  },
+  async fijar(clave, minutos){
+    const salt = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(16))));
+    const hash = await this.derivar(clave, salt);
+    this.cfg = { hash, salt, minutos: typeof minutos==='number' ? minutos : this.minutos() };
+    localStorage.setItem(LLAVE_ACCESO, JSON.stringify(this.cfg));
+  },
+  async verificar(clave){
+    const c = this.leer(); if(!c) return true;
+    try{ return (await this.derivar(clave, c.salt)) === c.hash; }catch(e){ return false; }
+  },
+  quitar(){ this.cfg = null; localStorage.removeItem(LLAVE_ACCESO); this.desbloquear(); },
+  guardarMinutos(m){
+    const c = this.leer(); if(!c) return;
+    c.minutos = m; this.cfg = c; localStorage.setItem(LLAVE_ACCESO, JSON.stringify(c));
+    this.reiniciarConteo();
+  },
+
+  /* ---- bloqueo ---- */
+  bloquear(){
+    if(!this.activa() || this.bloqueada) return;
+    this.bloqueada = true;
+    localStorage.setItem('miNegocio_bloqueada','1');
+    this.pintar();
+  },
+  desbloquear(){
+    this.bloqueada = false;
+    localStorage.removeItem('miNegocio_bloqueada');
+    const el = document.getElementById('candado'); if(el) el.remove();
+    this.reiniciarConteo();
+  },
+  reiniciarConteo(){
+    clearTimeout(this.timer);
+    const m = this.minutos();
+    if(!this.activa() || !m) return;
+    this.ultimoUso = Date.now();
+    this.timer = setTimeout(()=>this.bloquear(), m*60000);
+  },
+  /* Al volver a la app se comprueba el reloj: minimizarla no congela el conteo */
+  alVolver(){
+    if(!this.activa() || this.bloqueada) return;
+    const m = this.minutos();
+    if(m && this.ultimoUso && (Date.now()-this.ultimoUso) > m*60000) this.bloquear();
+    else this.reiniciarConteo();
+  },
+  vigilar(){
+    ['click','keydown','touchstart','pointerdown'].forEach(ev=>
+      document.addEventListener(ev, ()=>{ if(!this.bloqueada) this.reiniciarConteo(); }, {passive:true, capture:true}));
+    document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible') this.alVolver(); });
+    this.reiniciarConteo();
+  },
+
+  /* ---- pantalla de bloqueo ---- */
+  pintar(){
+    if(document.getElementById('candado')) return;
+    const d = document.createElement('div');
+    d.id = 'candado';
+    d.setAttribute('role','dialog'); d.setAttribute('aria-modal','true'); d.setAttribute('aria-label','App bloqueada');
+    d.className = 'fixed inset-0 z-[100] grad-brand flex items-center justify-center p-6';
+    d.innerHTML = `
+      <div class="w-full max-w-xs text-center text-white">
+        <div class="text-5xl mb-3">🔒</div>
+        <h2 class="text-xl font-bold mb-1">${esc(DB.config.negocio||'Mi Negocio')}</h2>
+        <p class="text-sm text-white/80 mb-5">Escribe tu clave para continuar</p>
+        <form onsubmit="return intentarDesbloquear(event)">
+          <input id="candadoClave" type="password" inputmode="numeric" autocomplete="current-password"
+                 aria-label="Clave de acceso" placeholder="••••"
+                 class="w-full text-center text-2xl tracking-[0.4em] rounded-xl px-4 py-3 text-slate-800 mb-2">
+          <div id="candadoMsg" class="text-xs text-rose-200 min-h-[16px] mb-2"></div>
+          <button type="submit" class="w-full bg-white text-brand-700 font-bold py-3 rounded-xl">Entrar</button>
+        </form>
+        <button type="button" onclick="olvidoClave()" class="text-xs text-white/70 underline mt-4">¿Olvidaste la clave?</button>
+      </div>`;
+    document.body.appendChild(d);
+    setTimeout(()=>{ const i=document.getElementById('candadoClave'); if(i) i.focus(); }, 50);
+  }
+};
+let intentosClave = 0;
+async function intentarDesbloquear(e){
+  e.preventDefault();
+  const inp = document.getElementById('candadoClave'), msg = document.getElementById('candadoMsg');
+  const ok = await seguridad.verificar(inp.value);
+  if(ok){ intentosClave = 0; seguridad.desbloquear(); return false; }
+  intentosClave++;
+  inp.value = '';
+  if(msg) msg.textContent = intentosClave >= 3
+    ? `Clave incorrecta (${intentosClave} intentos). Si la olvidaste, usa el enlace de abajo.`
+    : 'Clave incorrecta';
+  // Espera creciente para que no se pueda probar clave tras clave a toda velocidad
+  if(intentosClave >= 3){
+    inp.disabled = true;
+    setTimeout(()=>{ inp.disabled = false; inp.focus(); }, Math.min(30000, 2000*(intentosClave-2)));
+  }
+  return false;
+}
+function olvidoClave(){
+  const conNube = !!(cloud.ready && cloud.user);
+  alert(conNube
+    ? 'Para quitar la clave: cierra la app, vuelve a abrirla en otro dispositivo donde no tengas clave, o borra los datos del navegador en este. Tus datos están en la nube y se vuelven a bajar al iniciar sesión.'
+    : 'No hay forma de recuperar la clave desde aquí. Si tienes tus datos en la nube (o un respaldo), puedes borrar los datos del navegador en este dispositivo y volver a entrar con tu cuenta. Si NO tienes respaldo, no borres nada: pide ayuda antes.');
+}
+
 /* ---------- Arranque ---------- */
 applyTheme();
 render();
 cloud.init();
+// Si hay clave, la app arranca bloqueada (también si se cerró estando bloqueada)
+if(seguridad.activa()) seguridad.bloquear();
+seguridad.vigilar();
 // Aviso al abrir la app si hay cobros/pagos con fecha límite a 5 días o menos
 setTimeout(()=>{
   const n=creditosPorVencer().length;
