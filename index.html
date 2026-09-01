@@ -228,9 +228,18 @@ const store = {
     d.config = Object.assign({ negocio:'Mi Negocio', alertaVencimiento:30, alertaStock:5, nextConsecutivo:1, anchoTicket:58, ticketCPL:32, ticketEntrega:'' }, d.config||{});
     ['clientes','productos','compras','ventas','gastos','proveedores'].forEach(k=>{ if(!Array.isArray(d[k])) d[k]=[]; });
     d.productos.forEach(p=>(p.lotes||[]).forEach(l=>{ if(!l.id) l.id=uid(); })); // lotes viejos sin id (previos a la edición por lote)
+    // Ventas: del modelo viejo (un solo medio, fiado de todo o nada) al nuevo
+    (d.ventas||[]).forEach(v=>{
+      if(!Array.isArray(v.pagos)){
+        v.pagos = v.fiado ? [] : [{ medio: v.metodo||'Efectivo', monto: +v.total||0 }];
+      }
+      if(typeof v.credito !== 'number'){ v.credito = v.fiado ? (+v.total||0) : 0; }
+      v.fiado = v.credito > 0;
+    });
     // Clientes y proveedores siempre con historial y saldo numerico (repara datos viejos)
     [].concat(d.clientes, d.proveedores).forEach(x=>{
       if(!Array.isArray(x.movs)) x.movs=[];
+      x.movs.forEach(m=>{ if(!m.id) m.id=uid(); });   // sin id no se podrían corregir
       if(typeof x.saldo!=='number' || isNaN(x.saldo)) x.saldo=0;
       x.movs.forEach(m=>{ if(!m.id) m.id=uid(); });
       // Facturas sin `pagado`: son datos anteriores al pago por factura
@@ -593,6 +602,28 @@ const getProveedor = id => DB.proveedores.find(p=>p.id===id);
 /* ---------- Cartera por factura (clientes y proveedores) ----------
    Cada movimiento de cargo ('credito' en proveedores, 'fiado' en clientes) es una factura
    y lleva `pagado` = cuanto se le ha abonado. Asi se puede pagar factura por factura. */
+/* ---------- Formas de pago de una venta ----------
+   Una venta puede cobrarse con varios medios a la vez y dejar un saldo a crédito.
+   Modelo nuevo: venta.pagos=[{medio,monto}] + venta.credito.
+   Las ventas viejas (un solo `metodo` y `fiado` de todo o nada) se leen igual
+   con estos ayudantes, así que nada se rompe. */
+function pagosDeVenta(v){
+  if(Array.isArray(v.pagos)) return v.pagos.filter(x=>(+x.monto||0)>0);
+  return v.fiado ? [] : [{ medio: v.metodo||'Efectivo', monto: +v.total||0 }];
+}
+function creditoDeVenta(v){
+  if(typeof v.credito === 'number') return v.credito;
+  return v.fiado ? (+v.total||0) : 0;
+}
+function pagadoDeVenta(v){ return pagosDeVenta(v).reduce((s,x)=>s+(+x.monto||0),0); }
+/* Etiqueta corta para listados y recibos */
+function resumenMedioPago(pagos, credito){
+  const n = (pagos||[]).length;
+  if(credito > 0) return n ? 'Mixto' : 'Crédito';
+  if(n === 1) return pagos[0].medio;
+  return n ? 'Mixto' : 'Efectivo';
+}
+
 function esCargo(m){ return m.tipo==='credito' || m.tipo==='fiado'; }
 function esDescargo(m){ return m.tipo==='abono' || m.tipo==='anulacion'; }
 function porFechaMov(a,b){ return ((a.fecha||'')+(a.id||'')) < ((b.fecha||'')+(b.id||'')) ? -1 : 1; }
@@ -616,6 +647,52 @@ function etiquetaCargo(m){
 }
 /* Aplica un pago a UNA factura concreta (movId) o, si no se indica,
    a las facturas mas antiguas primero. Devuelve a que facturas se aplico. */
+/* Reconstruye desde cero cuánto se ha pagado de cada factura y el saldo final.
+   Se usa después de EDITAR o BORRAR un movimiento: sin esto, quedaba una factura
+   marcada como pagada con un pago que ya no existe (o que cambió de monto).
+   Criterio: cada pago se aplica primero a las facturas que él mismo indicaba
+   (si todavía existen) y el resto va a las más antiguas pendientes. */
+function recalcularCartera(x){
+  const movs = x.movs || [];
+  movs.filter(esCargo).forEach(m=>{ m.pagado = 0; delete m.anulada; });
+
+  /* Primero las ANULACIONES. Una anulación cancela una compra concreta, así que
+     se busca la factura pendiente del MISMO valor (así se generan siempre); si no
+     aparece ninguna, se aplica a la más antigua. Sin esto, la compra anulada
+     seguía figurando como pendiente aunque el saldo global sí cuadrara. */
+  movs.filter(m=>m.tipo==='anulacion').slice().sort(porFechaMov).forEach(an=>{
+    let resta = +an.monto || 0;
+    const pendientes = facturasPendientes(x);
+    const exacta = pendientes.find(f => Math.abs(pendienteDe(f) - resta) < 1);
+    const objetivo = exacta ? [exacta] : pendientes;
+    for(const f of objetivo){
+      if(resta <= 0) break;
+      const pend = pendienteDe(f); if(pend <= 0) continue;
+      const usa = Math.min(pend, resta);
+      f.pagado = (+f.pagado||0) + usa; resta -= usa;
+      if(pendienteDe(f) <= 0) f.anulada = true;
+    }
+  });
+
+  movs.filter(m=>m.tipo==='abono').slice().sort(porFechaMov).forEach(pago=>{
+    let resta = +pago.monto || 0;
+    const aplicado = [];
+    const aplicarEn = f => {
+      if(resta <= 0 || !f || !esCargo(f)) return;
+      const pend = pendienteDe(f); if(pend <= 0) return;
+      const usa = Math.min(pend, resta);
+      f.pagado = (+f.pagado||0) + usa; resta -= usa;
+      aplicado.push({ movId:f.id, etiqueta:etiquetaCargo(f), monto:usa });
+    };
+    (pago.aplicaA||[]).forEach(a => aplicarEn(movs.find(m=>m.id===a.movId)));
+    facturasPendientes(x).forEach(aplicarEn);
+    pago.aplicaA = aplicado;
+    if(resta > 0) pago.sobrante = resta; else delete pago.sobrante;
+  });
+  x.saldo = saldoCalculado(x);
+  return x;
+}
+
 function aplicarPago(x, monto, movId){
   const aplicaA=[]; let resta=monto;
   const objetivo = movId ? (x.movs||[]).filter(m=>m.id===movId) : facturasPendientes(x);
@@ -1939,6 +2016,94 @@ function waEstadoCuentaProv(id){
   if(tel.length===10 && tel.startsWith('3')) tel='57'+tel;
   window.open('https://wa.me/'+(tel||'')+'?text='+encodeURIComponent(estadoCuentaProvTexto(p)),'_blank');
 }
+/* ---------- Corregir movimientos de un proveedor ----------
+   Hasta ahora una factura o un pago mal digitado no se podía tocar: la cuenta
+   quedaba mostrando "pagada" con saldo real pendiente. */
+function editarCargoProv(provId, movId){
+  const p = getProveedor(provId); if(!p) return;
+  const m = (p.movs||[]).find(x=>x.id===movId); if(!m) return;
+  openModal('✏️ Corregir factura', `
+    <form onsubmit="return guardarCargoProv(event,'${provId}','${movId}')">
+      <p class="text-xs text-slate-500 mb-3">Proveedor: <b>${esc(p.nombre)}</b>. Al guardar se vuelven a repartir los pagos y se recalcula el saldo.</p>
+      ${field('N° de factura',`<input name="numeroFactura" value="${esc(m.numeroFactura||'')}" class="${inputCls}" placeholder="Ej: 302">`)}
+      ${field('Valor de la factura *',`<input name="monto" type="number" min="0" step="any" required value="${+m.monto||0}" class="${inputCls}">`)}
+      <div class="grid grid-cols-2 gap-2">
+        ${field('Fecha',`<input name="fecha" type="date" value="${m.fecha||todayISO()}" class="${inputCls}">`)}
+        ${field('Pagar antes del',`<input name="vence" type="date" value="${m.vence||''}" class="${inputCls}">`)}
+      </div>
+      <div class="flex gap-2 mt-2">
+        <button type="submit" class="flex-1 bg-brand hover:bg-brand-700 text-white font-semibold py-2.5 rounded-xl">Guardar</button>
+        <button type="button" onclick="eliminarMovProv('${provId}','${movId}')" class="border border-rose-200 text-rose-600 px-4 rounded-xl text-sm">Eliminar</button>
+      </div>
+    </form>`);
+}
+function guardarCargoProv(e, provId, movId){
+  e.preventDefault();
+  const p = getProveedor(provId), m = (p.movs||[]).find(x=>x.id===movId);
+  if(!p || !m) return false;
+  const f = e.target;
+  const monto = +f.monto.value || 0;
+  if(monto <= 0){ toast('El valor debe ser mayor que cero','err'); return false; }
+  m.numeroFactura = f.numeroFactura.value.trim() || null;
+  m.monto = monto;
+  m.fecha = f.fecha.value || m.fecha;
+  m.vence = f.vence.value || null;
+  recalcularCartera(p);
+  store.save(); render(); openEstadoCuentaProv(provId);
+  toast('Factura corregida ✔');
+  return false;
+}
+function editarAbonoProv(provId, movId){
+  const p = getProveedor(provId); if(!p) return;
+  const m = (p.movs||[]).find(x=>x.id===movId); if(!m) return;
+  openModal('✏️ Corregir pago', `
+    <form onsubmit="return guardarAbonoProv(event,'${provId}','${movId}')">
+      <p class="text-xs text-slate-500 mb-3">Proveedor: <b>${esc(p.nombre)}</b>. Al guardar se vuelven a repartir los pagos sobre las facturas y se recalcula el saldo.</p>
+      ${field('Monto pagado *',`<input name="monto" type="number" min="0" step="any" required value="${+m.monto||0}" class="${inputCls}">`)}
+      ${field('¿A qué factura?',`<select name="aplicaA" class="${inputCls}">
+         <option value="">Repartir entre las más antiguas</option>
+         ${(p.movs||[]).filter(esCargo).sort(porFechaMov).map(f=>`<option value="${f.id}"${(m.aplicaA&&m.aplicaA.length===1&&m.aplicaA[0].movId===f.id)?' selected':''}>${esc(etiquetaCargo(f))} — ${fmtMoney(f.monto)}</option>`).join('')}
+       </select>`)}
+      <div class="grid grid-cols-2 gap-2">
+        ${field('Fecha',`<input name="fecha" type="date" value="${m.fecha||todayISO()}" class="${inputCls}">`)}
+        ${field('Medio de pago',`<select name="medioPago" class="${inputCls}">${MEDIOS_PAGO.map(x=>`<option${m.medioPago===x?' selected':''}>${x}</option>`).join('')}</select>`)}
+      </div>
+      ${(m.aplicaA&&m.aplicaA.length)?`<p class="text-[11px] text-slate-400 -mt-1 mb-3">Hoy está aplicado a: ${m.aplicaA.map(a=>`${esc(a.etiqueta)} (${fmtMoney(a.monto)})`).join(', ')}</p>`:''}
+      <div class="flex gap-2 mt-2">
+        <button type="submit" class="flex-1 bg-brand hover:bg-brand-700 text-white font-semibold py-2.5 rounded-xl">Guardar</button>
+        <button type="button" onclick="eliminarMovProv('${provId}','${movId}')" class="border border-rose-200 text-rose-600 px-4 rounded-xl text-sm">Eliminar</button>
+      </div>
+    </form>`);
+}
+function guardarAbonoProv(e, provId, movId){
+  e.preventDefault();
+  const p = getProveedor(provId), m = (p.movs||[]).find(x=>x.id===movId);
+  if(!p || !m) return false;
+  const f = e.target;
+  const monto = +f.monto.value || 0;
+  if(monto <= 0){ toast('El monto debe ser mayor que cero','err'); return false; }
+  m.monto = monto;
+  m.fecha = f.fecha.value || m.fecha;
+  m.medioPago = f.medioPago.value;
+  // Si el usuario indica la factura, el recálculo la respeta; si no, reparte por antigüedad
+  const elegida = f.aplicaA ? f.aplicaA.value : '';
+  m.aplicaA = elegida ? [{ movId: elegida, etiqueta:'', monto }] : [];
+  recalcularCartera(p);
+  store.save(); render(); openEstadoCuentaProv(provId);
+  toast('Pago corregido ✔');
+  return false;
+}
+function eliminarMovProv(provId, movId){
+  const p = getProveedor(provId); if(!p) return;
+  const m = (p.movs||[]).find(x=>x.id===movId); if(!m) return;
+  const que = m.tipo==='abono' ? 'este pago' : m.tipo==='credito' ? 'esta factura' : 'este movimiento';
+  if(!confirm(`¿Eliminar ${que} de ${fmtMoney(m.monto)}? El saldo se recalcula.`)) return;
+  p.movs = (p.movs||[]).filter(x=>x.id!==movId);
+  recalcularCartera(p);
+  store.save(); render(); openEstadoCuentaProv(provId);
+  toast('Movimiento eliminado');
+}
+
 function openEstadoCuentaProv(id){
   const p=getProveedor(id); if(!p) return;
   const movs=(p.movs||[]).slice().sort((a,b)=> a.fecha<b.fecha?-1: a.fecha>b.fecha?1: 0);
@@ -1948,15 +2113,16 @@ function openEstadoCuentaProv(id){
         if(m.tipo==='credito'){
           const prods=(m.items||[]).map(esc).join(', ');
           return `<div class="border-b border-slate-100 pb-2">
-            <div class="flex justify-between text-sm"><span class="font-medium">${esc(etiquetaCargo(m))}${m.vence?` <span class="text-xs text-rose-600 font-normal">· pagar antes del ${fmtDate(m.vence)}</span>`:''}</span><span class="font-semibold text-rose-600">+${fmtMoney(m.monto)}</span></div>
-            <div class="text-xs mt-0.5 ${pendienteDe(m)>0?'text-rose-600 font-medium':'text-teal-600 font-medium'}">${pendienteDe(m)>0?`Pendiente: ${fmtMoney(pendienteDe(m))}`:'✓ Pagada'}${(+m.pagado||0)>0&&pendienteDe(m)>0?` · abonado ${fmtMoney(m.pagado)}`:''}</div>
+            <div class="flex justify-between text-sm gap-2"><span class="font-medium min-w-0">${esc(etiquetaCargo(m))}${m.vence?` <span class="text-xs text-rose-600 font-normal">· pagar antes del ${fmtDate(m.vence)}</span>`:''}</span><span class="shrink-0"><button type="button" onclick="editarCargoProv('${p.id}','${m.id}')" title="Corregir factura" aria-label="Corregir factura" class="text-slate-400 hover:text-brand-700 text-xs mr-1">✏️</button><span class="font-semibold text-rose-600">+${fmtMoney(m.monto)}</span></span></div>
+            <div class="text-xs mt-0.5 ${pendienteDe(m)>0?'text-rose-600 font-medium':(m.anulada?'text-slate-400 font-medium':'text-teal-600 font-medium')}">${pendienteDe(m)>0?`Pendiente: ${fmtMoney(pendienteDe(m))}`:(m.anulada?'✕ Anulada':'✓ Pagada')}${(+m.pagado||0)>0&&pendienteDe(m)>0?` · abonado ${fmtMoney(m.pagado)}`:''}</div>
             ${prods?`<div class="text-xs text-slate-400 mt-0.5">${prods}</div>`:''}
           </div>`;
         }
         if(m.tipo==='abono'){
           return `<div class="border-b border-slate-100 pb-2">
-            <div class="flex justify-between text-sm"><span>${fmtDate(m.fecha)} · Pago realizado${m.medioPago?` <span class="text-xs text-slate-400 font-normal">· ${esc(m.medioPago)}</span>`:''}</span><span class="font-semibold text-teal-600">−${fmtMoney(m.monto)}</span></div>
+            <div class="flex justify-between text-sm gap-2"><span class="min-w-0">${fmtDate(m.fecha)} · Pago realizado${m.medioPago?` <span class="text-xs text-slate-400 font-normal">· ${esc(m.medioPago)}</span>`:''}</span><span class="shrink-0"><button type="button" onclick="editarAbonoProv('${p.id}','${m.id}')" title="Corregir pago" aria-label="Corregir pago" class="text-slate-400 hover:text-brand-700 text-xs mr-1">✏️</button><span class="font-semibold text-teal-600">−${fmtMoney(m.monto)}</span></span></div>
             ${(m.aplicaA&&m.aplicaA.length)?`<div class="text-xs text-slate-400 mt-0.5">Aplicado a: ${m.aplicaA.map(a=>`${esc(a.etiqueta)} (${fmtMoney(a.monto)})`).join(', ')}</div>`:''}
+            ${m.sobrante?`<div class="text-xs text-amber-600 mt-0.5 font-medium">Sobró ${fmtMoney(m.sobrante)} sin aplicar (pagaste más de lo que sumaban las facturas)</div>`:''}
             ${(m.soporte&&(m.soporte.data||m.soporte.path))?`<div class="mt-0.5"><button type="button" onclick="abrirSoportePago('${p.id}','${m.id}')" class="text-xs text-brand-700 font-medium underline">${etiquetaAdjunto(m.soporte,'soporte')}</button></div>`:''}
           </div>`;
         }
@@ -2024,8 +2190,8 @@ function ajustarStock(id){
 
 /* ----- Venta ----- */
 let carritoV=[];
-function openVenta(){ carritoV=[]; showVenta(); }
-function showVenta(){ openModal('Nueva venta', ventaBody(), 'lg'); }
+function openVenta(){ carritoV=[]; iniciarPagosVenta(); showVenta(); }
+function showVenta(){ openModal('Nueva venta', ventaBody(), 'lg'); actualizarResumenPago(); }
 function ventaBody(){
   const total=carritoV.reduce((s,i)=>s+i.cant*i.precio,0);
   const disponibles=DB.productos.filter(p=>stockDe(p)>0);
@@ -2063,23 +2229,26 @@ function ventaBody(){
         <button type="button" onclick="rmCarrito(${idx})" class="text-rose-400 text-lg px-1">×</button>
       </div>`;}).join('')}</div>` : `<p class="text-sm text-slate-400 text-center py-4">Agrega productos a la venta.</p>`}
     <div class="flex justify-between items-center text-lg font-bold border-t border-slate-100 pt-3 mb-3"><span>Total</span><span class="text-teal-600">${fmtMoney(total)}</span></div>
-    ${field('Método de pago',`<select id="vMetodo" class="${inputCls}"><option>Efectivo</option><option>Nequi</option><option>Daviplata</option><option>Tarjeta</option><option>Transferencia</option></select>`)}
+    <div class="mb-1 flex items-center justify-between">
+      <span class="text-xs text-slate-500 font-medium">Cómo paga</span>
+      <button type="button" onclick="addMedioPago()" class="text-xs text-brand-700 font-medium">+ Otro medio</button>
+    </div>
+    <div id="vPagosArea" class="space-y-2 mb-2">${filasPagoHTML()}</div>
+    <div id="vResumenPago" class="text-xs mb-3"></div>
     ${DB.clientes.length?field('Cliente (opcional)',`<select id="vCliente" onchange="onVentaCliente()" class="${inputCls}"><option value="">Sin cliente</option>${clOpts}</select>`):''}
-    <label class="flex items-center gap-2 mb-2 text-sm"><input type="checkbox" id="vFiado" onchange="onVentaCredito()"> Venta a crédito (queda como deuda del cliente)</label>
     <div id="vPlazoWrap" class="hidden mb-4">
       ${field('Plazo de pago (meses)',`<input id="vPlazo" type="number" min="1" step="1" value="1" oninput="actualizarPlazoInfo()" class="${inputCls}">`)}
       <p id="vPlazoInfo" class="text-[11px] text-slate-400 -mt-2"></p>
     </div>
-    <button type="button" onclick="confirmVenta()" ${carritoV.length?'':'disabled'} class="w-full bg-teal-600 disabled:bg-slate-200 disabled:text-slate-500 disabled:cursor-not-allowed hover:bg-teal-700 text-white font-semibold py-3 rounded-xl">Registrar venta · ${fmtMoney(total)}</button>`;
+    <button type="button" id="vBtnVenta" onclick="confirmVenta()" ${carritoV.length?'':'disabled'} class="w-full bg-teal-600 disabled:bg-slate-200 disabled:text-slate-500 disabled:cursor-not-allowed hover:bg-teal-700 text-white font-semibold py-3 rounded-xl">Registrar venta · ${fmtMoney(total)}</button>`;
 }
-function refreshVenta(){ const b=$('#modal .p-5'); if(b) b.innerHTML=ventaBody(); }
+function refreshVenta(){
+  sincronizarPagoAuto();
+  const b=$('#modal .p-5'); if(b) b.innerHTML=ventaBody();
+  actualizarResumenPago();
+}
 // Suma meses a una fecha ISO (para la fecha límite del crédito)
 function addMonths(iso, m){ const d=new Date(iso+'T12:00:00'); d.setMonth(d.getMonth()+(+m||0)); return isoLocal(d); }
-function onVentaCredito(){
-  const on=$('#vFiado')?.checked; const w=$('#vPlazoWrap');
-  if(w) w.classList.toggle('hidden',!on);
-  if(on) onVentaCliente();
-}
 function onVentaCliente(){
   const c=getCliente($('#vCliente')?.value||'');
   const inp=$('#vPlazo');
@@ -2153,25 +2322,106 @@ function addCarrito(){
   refreshVenta();
 }
 function rmCarrito(idx){ carritoV.splice(idx,1); refreshVenta(); }
+/* ---------- Medios de pago dentro del formulario de venta ---------- */
+let pagosV = [];        // [{medio, monto}] — lo que el cliente paga AHORA
+let pagoManual = false; // ¿el usuario ya tocó los montos? Entonces dejamos de autocompletar
+function totalCarrito(){ return carritoV.reduce((s,i)=>s+i.cant*i.precio,0); }
+function iniciarPagosVenta(){ pagosV = [{ medio:'Efectivo', monto: totalCarrito() }]; pagoManual = false; }
+function onMontoPago(){ pagoManual = true; leerPagosVenta(); }
+/* Mientras el usuario no toque los montos, el único medio sigue al total del carrito:
+   así el caso normal (paga todo en efectivo) no obliga a escribir nada. */
+function sincronizarPagoAuto(){
+  if(pagoManual) return;
+  pagosV = [{ medio: (pagosV[0] && pagosV[0].medio) || 'Efectivo', monto: totalCarrito() }];
+}
+function filasPagoHTML(){
+  if(!pagosV.length) pagosV = [{ medio:'Efectivo', monto: totalCarrito() }];
+  return pagosV.map((pg,i)=>`
+    <div class="flex gap-2" data-pago>
+      <select onchange="leerPagosVenta()" aria-label="Medio de pago" class="${inputCls} flex-1">
+        ${MEDIOS_VENTA.map(m=>`<option${pg.medio===m?' selected':''}>${m}</option>`).join('')}
+      </select>
+      <input type="number" min="0" step="any" value="${pg.monto||0}" oninput="onMontoPago()"
+             aria-label="Monto" placeholder="Monto" class="${inputCls} w-28">
+      ${pagosV.length>1?`<button type="button" onclick="quitarMedioPago(${i})" aria-label="Quitar medio" class="text-rose-400 text-lg px-1">×</button>`:''}
+    </div>`).join('');
+}
+const MEDIOS_VENTA = ['Efectivo','Nequi','Daviplata','Tarjeta','Transferencia'];
+/* Lee los campos del formulario (la verdad está en el DOM) y refresca el resumen */
+function leerPagosVenta(){
+  const filas = [...document.querySelectorAll('#vPagosArea [data-pago]')];
+  if(filas.length) pagosV = filas.map(f=>({
+    medio: f.querySelector('select').value,
+    monto: Math.max(0, +f.querySelector('input').value || 0)
+  }));
+  actualizarResumenPago();
+  return pagosV;
+}
+function addMedioPago(){
+  leerPagosVenta(); pagoManual = true;
+  const falta = Math.max(0, totalCarrito() - pagosV.reduce((s,p)=>s+p.monto,0));
+  const usados = new Set(pagosV.map(p=>p.medio));
+  pagosV.push({ medio: MEDIOS_VENTA.find(m=>!usados.has(m)) || 'Efectivo', monto: falta });
+  repintarPagos();
+}
+function quitarMedioPago(i){ leerPagosVenta(); pagosV.splice(i,1); repintarPagos(); }
+function repintarPagos(){
+  const a = document.getElementById('vPagosArea');
+  if(a){ a.innerHTML = filasPagoHTML(); actualizarResumenPago(); }
+}
+/* Muestra cuánto se paga ahora y cuánto queda a crédito */
+function actualizarResumenPago(){
+  const total = totalCarrito();
+  const pagado = pagosV.reduce((s,p)=>s+(+p.monto||0),0);
+  const credito = Math.round((total - pagado) * 100) / 100;
+  const cajon = document.getElementById('vResumenPago');
+  const wrap = document.getElementById('vPlazoWrap');
+  const btn = document.getElementById('vBtnVenta');
+  if(cajon){
+    if(credito > 0.5){
+      cajon.innerHTML = `<span class="text-slate-500">Paga ahora <b>${fmtMoney(pagado)}</b></span> · <span class="text-amber-600 font-semibold">Queda a crédito ${fmtMoney(credito)}</span>`;
+    } else if(credito < -0.5){
+      cajon.innerHTML = `<span class="text-rose-600 font-semibold">Lo pagado supera el total en ${fmtMoney(-credito)}</span>`;
+    } else {
+      cajon.innerHTML = `<span class="text-teal-600 font-medium">Pagada completa</span>`;
+    }
+  }
+  if(wrap) wrap.classList.toggle('hidden', !(credito > 0.5));
+  if(credito > 0.5) actualizarPlazoInfo();
+  if(btn) btn.textContent = credito > 0.5
+    ? `Registrar venta · ${fmtMoney(pagado)} + ${fmtMoney(credito)} a crédito`
+    : `Registrar venta · ${fmtMoney(total)}`;
+}
+
 function confirmVenta(){
   if(!carritoV.length) return;
-  const fiado=$('#vFiado')?.checked||false;
   const clienteId=$('#vCliente')?.value||'';
-  if(fiado && !clienteId) return toast('Elige un cliente para la venta a crédito','err');
   const total=carritoV.reduce((s,i)=>s+i.cant*i.precio,0);
+  // Lo que paga ahora (uno o varios medios) y lo que queda a deber.
+  // Si no hay formulario a la vista (llamada directa), se asume pagada de contado:
+  // nunca convertir una venta en crédito por accidente.
+  const hayForm = !!document.querySelector('#vPagosArea');
+  let fuente = hayForm ? leerPagosVenta() : pagosV;
+  if(!hayForm && !fuente.length) fuente = [{ medio:'Efectivo', monto: total }];
+  const pagos = fuente.filter(p=>p.monto>0);
+  const pagado = pagos.reduce((s,p)=>s+p.monto,0);
+  if(pagado > total + 0.5) return toast('Lo pagado supera el total de la venta','err');
+  const credito = Math.max(0, Math.round(total - pagado));
+  const fiado = credito > 0;
+  if(fiado && !clienteId) return toast('Queda un saldo a crédito: elige el cliente','err');
   const ganancia=carritoV.reduce((s,i)=>s+i.cant*(i.precio-(i.costo||0)),0);
   carritoV.forEach(i=>descontarStock(i.prodId,i.cant));
-  const metodo = fiado ? 'Crédito' : (($('#vMetodo')&&$('#vMetodo').value)||'Efectivo');
+  const metodo = resumenMedioPago(pagos, credito);
   const plazoMeses = fiado ? Math.max(1,+($('#vPlazo')?.value)||getCliente(clienteId)?.plazoMeses||1) : null;
   const venceCredito = fiado ? addMonths(todayISO(), plazoMeses) : null;
-  const venta={ id:uid(), consecutivo:DB.config.nextConsecutivo++, fecha:todayISO(), creado:Date.now(), items:carritoV.map(i=>({prodId:i.prodId,cant:i.cant,precio:i.precio,costo:i.costo})), total, ganancia, fiado, metodo, clienteId:clienteId||null, plazoMeses, venceCredito };
+  const venta={ id:uid(), consecutivo:DB.config.nextConsecutivo++, fecha:todayISO(), creado:Date.now(), items:carritoV.map(i=>({prodId:i.prodId,cant:i.cant,precio:i.precio,costo:i.costo})), total, ganancia, fiado, credito, pagos, metodo, clienteId:clienteId||null, plazoMeses, venceCredito };
   DB.ventas.push(venta);
   if(fiado && clienteId){
-    const c=getCliente(clienteId); c.saldo=(c.saldo||0)+total; c.movs=c.movs||[];
+    const c=getCliente(clienteId); c.saldo=(c.saldo||0)+credito; c.movs=c.movs||[];
     const items = carritoV.map(i=>({nombre:getProducto(i.prodId)?.nombre||'(producto)', cant:i.cant}));
-    c.movs.push({id:uid(),fecha:todayISO(),tipo:'fiado',monto:total,pagado:0,ventaId:venta.id,items,plazoMeses,vence:venceCredito});
+    c.movs.push({id:uid(),fecha:todayISO(),tipo:'fiado',monto:credito,pagado:0,ventaId:venta.id,items,plazoMeses,vence:venceCredito});
   }
-  carritoV=[];                       // el carrito ya se convirtio en venta
+  carritoV=[]; pagosV=[];            // el carrito ya se convirtio en venta
   store.save(); closeModal(); render(); toast('Venta registrada ✔');
   verVenta(venta.id); // muestra el recibo con opciones de WhatsApp/imprimir
 }
@@ -2194,10 +2444,18 @@ function verVenta(id){
 }
 
 /* ----- Recibos ----- */
+/* Desglose de cómo se pagó, para el recibo impreso */
+function desglosePagoTexto(v){
+  const pagos = pagosDeVenta(v), credito = creditoDeVenta(v);
+  if(!pagos.length) return 'Pago: Crédito';
+  const lineas = pagos.map(p=>`Pago ${p.medio}: ${fmtMoney(p.monto)}`);
+  if(credito > 0) lineas.push(`Saldo a crédito: ${fmtMoney(credito)}`);
+  return lineas.join('\n');
+}
 function reciboTexto(v){
   const cl = v.clienteId ? getCliente(v.clienteId) : null;
   const lineas = v.items.map(i=>{ const p=getProducto(i.prodId); return `• ${p?p.nombre:'(producto)'} x${i.cant} = ${fmtMoney(i.cant*i.precio)}`; });
-  return `🧾 *${DB.config.negocio}*\nRecibo de venta #${fmtConsec(v.consecutivo)} — ${fmtDate(v.fecha)}${cl?`\nCliente: ${cl.nombre}${cl.negocio?`\nNegocio: ${cl.negocio}`:''}`:''}\n\n${lineas.join('\n')}\n\n*TOTAL: ${fmtMoney(v.total)}*\nPago: ${v.fiado?'Crédito':(v.metodo||'Efectivo')}${v.fiado&&v.venceCredito?`\nPagar antes del: ${fmtDate(v.venceCredito)}`:''}\n\n¡Gracias por su compra! 💊`;
+  return `🧾 *${DB.config.negocio}*\nRecibo de venta #${fmtConsec(v.consecutivo)} — ${fmtDate(v.fecha)}${cl?`\nCliente: ${cl.nombre}${cl.negocio?`\nNegocio: ${cl.negocio}`:''}`:''}\n\n${lineas.join('\n')}\n\n*TOTAL: ${fmtMoney(v.total)}*\n${desglosePagoTexto(v)}${v.fiado&&v.venceCredito?`\nPagar antes del: ${fmtDate(v.venceCredito)}`:''}\n\n¡Gracias por su compra! 💊`;
 }
 function waVenta(id){
   const v=DB.ventas.find(x=>x.id===id); if(!v) return;
@@ -2440,9 +2698,11 @@ function delVenta(id){
   if(v.fiado && v.clienteId){
     const c=getCliente(v.clienteId);
     if(c){
-      // Solo se revierte lo que el cliente AUN debe; si ya habia abonado, queda a favor suyo
-      const aRevertir=Math.min(v.total, c.saldo||0);
-      const yaPagado=v.total-aRevertir;
+      // Solo se revierte la parte A CRÉDITO que el cliente AUN debe;
+      // lo que ya había abonado queda a favor suyo
+      const deuda=creditoDeVenta(v);
+      const aRevertir=Math.min(deuda, c.saldo||0);
+      const yaPagado=deuda-aRevertir;
       c.saldo=Math.max(0,(c.saldo||0)-aRevertir);
       c.movs=c.movs||[]; c.movs.push({fecha:todayISO(),tipo:'anulacion',monto:aRevertir});
       if(yaPagado>0) avisoPago=` · ${esc(c.nombre)} ya había pagado ${fmtMoney(yaPagado)}: queda a favor suyo`;
@@ -2536,10 +2796,11 @@ function cierreDatos(desde,hasta){
   const enRango=f=> f>=desde && f<=hasta;
   const vs=DB.ventas.filter(v=>enRango(v.fecha));
   const total=vs.reduce((s,v)=>s+v.total,0);
-  const fiado=vs.filter(v=>v.fiado).reduce((s,v)=>s+v.total,0);
+  // Con pagos mixtos, "fiado" es solo la PARTE a crédito de cada venta
+  const fiado=vs.reduce((s,v)=>s+creditoDeVenta(v),0);
   const ganancia=vs.reduce((s,v)=>s+(v.ganancia||0),0);
   const porMetodo={};
-  vs.filter(v=>!v.fiado).forEach(v=>{ const m=v.metodo||'Efectivo'; porMetodo[m]=(porMetodo[m]||0)+v.total; });
+  vs.forEach(v=>pagosDeVenta(v).forEach(pg=>{ const m=pg.medio||'Efectivo'; porMetodo[m]=(porMetodo[m]||0)+(+pg.monto||0); }));
   const abonos=DB.clientes.reduce((s,c)=>s+(c.movs||[]).filter(m=>m.tipo==='abono'&&enRango(m.fecha)).reduce((x,m)=>x+m.monto,0),0);
   const comprasList=DB.compras.filter(c=>enRango(c.fecha));
   const compras=comprasList.reduce((s,c)=>s+c.total,0);
@@ -2663,7 +2924,7 @@ function aplicarCuadre(){
   if(!probs.length) return toast('No hay nada que cuadrar');
   probs.forEach(x=>{
     const ent = x.tipo==='cliente' ? getCliente(x.id) : getProveedor(x.id);
-    if(ent) ent.saldo=saldoCalculado(ent);
+    if(ent) recalcularCartera(ent);   // reparte de nuevo los pagos y recalcula el saldo
   });
   store.save(); render(); openCuadre(); toast(`${probs.length} saldo(s) cuadrado(s)`);
 }
